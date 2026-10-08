@@ -1250,7 +1250,8 @@ function App() {
       const { error } = await supabase.from('cases').update({ status: 'COMPLETED' }).eq('id', item.id).eq('status', 'PRICING')
       if (error) throw new Error(error.message)
       await supabase.from('audit_trail').insert({ case_id: item.case_id, action: 'Final Submitted / Report Generated', stage: 'Pricing', old_status: 'PRICING', new_status: 'COMPLETED', remarks: 'Pricing final submitted and PDF generated.', user_id: null, user_name: 'SS Sundar Singh', role: 'Admin' })
-      await loadCases(); setTpaQcCase({ ...item, status: 'COMPLETED' }); setActive('Report Generated')
+      await loadCases(); setTpaQcCase({ ...item, status: 'COMPLETED' })
+      setTpaQcMessage('Final report generated successfully. Download the PDF or copy the report URL below.')
     } catch (error) { setActionError(error?.message || 'Unable to generate final report.') }
     finally { setActionSaving(false) }
   }
@@ -2701,7 +2702,7 @@ function App() {
         ) : active === 'QC Hold' ? (
           <TpaQcReport mode="QC Hold" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'QC Hold')} onSave={() => tpaQcCase && persistMasterInspectionReport(tpaQcCase, tpaQcForm, 'QC Hold', true)} onSubmit={() => tpaQcCase && moveQcHoldBackToQc(tpaQcCase)} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
         ) : active === 'Pricing' ? (
-          <TpaQcReport mode="Pricing" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Pricing')} onSave={() => tpaQcCase && persistMasterInspectionReport(tpaQcCase, tpaQcForm, 'Pricing', true)} onSubmit={() => tpaQcCase && pricingFinalSubmit(tpaQcCase)} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
+          <TpaQcReport mode="Pricing" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Pricing')} onSave={() => tpaQcCase && persistMasterInspectionReport(tpaQcCase, tpaQcForm, 'Pricing', true)} onSubmit={(meta) => tpaQcCase && pricingFinalSubmit(tpaQcCase, meta)} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
         ) : active === 'Report Generated' ? (
           <TpaQcReport mode="Report Generated" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Report Generated')} onSave={() => tpaQcCase && persistMasterInspectionReport(tpaQcCase, tpaQcForm, 'Report Generated', true)} onSubmit={() => {}} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
         ) : (
@@ -3734,6 +3735,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
   const [photoZoom, setPhotoZoom] = useState(1)
   const [pdfGenerating, setPdfGenerating] = useState(false)
   const [pdfMessage, setPdfMessage] = useState('')
+  const [reportEditMode, setReportEditMode] = useState(mode !== 'Report Generated')
 
   if (!caseItem) {
     const normalize = value => String(value || '').trim().toUpperCase().replace(/-/g, '_').replace(/\s+/g, '_')
@@ -3913,11 +3915,13 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
     }
   }
 
+  const fieldLocked = disabled => Boolean(disabled || (mode === 'Report Generated' && !reportEditMode))
+
   const selectField = (label, key, options, disabled = false) => (
     <label style={{ display: 'grid', gridTemplateColumns: '145px 1fr', alignItems: 'center', gap: 8, fontSize: 10, minHeight: 27 }}>
       <span style={{ fontWeight: 700, color: '#222' }}>{label}</span>
-      <select value={form[key] || ''} disabled={disabled} onChange={e => updateField(key, e.target.value)}
-        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '2px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: disabled ? '#f7f7f7' : '#fff' }}>
+      <select value={form[key] || ''} disabled={fieldLocked(disabled)} onChange={e => updateField(key, e.target.value)}
+        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '2px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: fieldLocked(disabled) ? '#f7f7f7' : '#fff' }}>
         <option value="">Select</option>
         {options.map(option => <option key={option} value={option}>{option}</option>)}
       </select>
@@ -3927,16 +3931,16 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
   const dateField = (label, key, disabled = false) => (
     <label style={{ display: 'grid', gridTemplateColumns: '145px 1fr', alignItems: 'center', gap: 8, fontSize: 10, minHeight: 27 }}>
       <span style={{ fontWeight: 700, color: '#222' }}>{label}</span>
-      <input type="date" value={dateValue(form[key])} disabled={disabled} onChange={e => updateField(key, e.target.value)}
-        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '2px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: disabled ? '#f7f7f7' : '#fff' }} />
+      <input type="date" value={dateValue(form[key])} disabled={fieldLocked(disabled)} onChange={e => updateField(key, e.target.value)}
+        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '2px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: fieldLocked(disabled) ? '#f7f7f7' : '#fff' }} />
     </label>
   )
 
   const textField = (label, key, disabled = false) => (
     <label style={{ display: 'grid', gridTemplateColumns: '145px 1fr', alignItems: 'center', gap: 8, fontSize: 10, minHeight: 27 }}>
       <span style={{ fontWeight: 700, color: '#222' }}>{label}</span>
-      <input value={form[key] || ''} disabled={disabled} onChange={e => updateField(key, e.target.value)}
-        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '3px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: disabled ? '#f7f7f7' : '#fff' }} />
+      <input value={form[key] || ''} disabled={fieldLocked(disabled)} onChange={e => updateField(key, e.target.value)}
+        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '3px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: fieldLocked(disabled) ? '#f7f7f7' : '#fff' }} />
     </label>
   )
 
@@ -4094,11 +4098,35 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
             {mode === 'QC' && <button className="primary" type="button" onClick={onSubmit} disabled={saving}>Approve &amp; Send to Pricing</button>}
             {mode === 'QC Hold' && <button className="primary" type="button" onClick={onSubmit} disabled={saving}>Resubmit to QC</button>}
             {mode === 'Pricing' && <button className="primary" type="button" onClick={async () => { try { const meta = await generateInspectionPdf(); await onSubmit(meta) } catch (e) { setPdfMessage(e?.message || 'Unable to generate PDF.') } }} disabled={saving || pdfGenerating}> {pdfGenerating ? 'Generating PDF...' : 'Final Submit & Generate Report'}</button>}
-            {(mode === 'Report Generated' && form.pdf_url) && <a href={form.pdf_url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', padding: '7px 10px', border: '1px solid #1d4ed8', color: '#1d4ed8', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Open PDF</a>}
+            {mode === 'Report Generated' && (
+              <>
+                <button type="button" onClick={() => setReportEditMode(v => !v)} style={{ padding: '7px 10px', border: '1px solid #7c3aed', background: reportEditMode ? '#f3e8ff' : '#fff', color: '#6d28d9', fontSize: 12, fontWeight: 700 }}>
+                  {reportEditMode ? 'Editing Report' : 'Edit Report'}
+                </button>
+                {reportEditMode && <button className="primary" type="button" onClick={async () => { await onSave(); setReportEditMode(false); setPdfMessage('Report changes saved successfully.') }} disabled={saving}>
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </button>}
+                {form.pdf_url && (
+                  <>
+                    <a href={form.pdf_url} download={`CarDekho_${caseItem.case_id}_Inspection_Report.pdf`} style={{ display: 'inline-flex', alignItems: 'center', padding: '7px 10px', border: '1px solid #16a34a', background: '#f0fdf4', color: '#15803d', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Download PDF</a>
+                    <a href={form.pdf_url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', padding: '7px 10px', border: '1px solid #1d4ed8', background: '#eff6ff', color: '#1d4ed8', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Open PDF</a>
+                    <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(form.pdf_url); setPdfMessage('PDF generated URL copied successfully.') } catch { setPdfMessage(`PDF generated URL: ${form.pdf_url}`) } }} style={{ padding: '7px 10px', border: '1px solid #64748b', background: '#fff', color: '#334155', fontSize: 12, fontWeight: 700 }}>Copy Report URL</button>
+                  </>
+                )}
+              </>
+            )}
           </div>
         </div>
         {message && <div style={{ marginTop: 8, padding: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: 12 }}>{message}</div>}
         {pdfMessage && <div style={{ marginTop: 8, padding: 8, background: '#eff6ff', border: '1px solid #bfdbfe', fontSize: 11 }}>{pdfMessage}</div>}
+        {mode === 'Report Generated' && form.pdf_url && (
+          <div style={{ marginTop: 8, padding: 9, background: '#f8fafc', border: '1px solid #cbd5e1', fontSize: 11 }}>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>PDF Generated</div>
+            <div><b>URL:</b> <span style={{ wordBreak: 'break-all' }}>{form.pdf_url}</span></div>
+            {form.pdf_generated_at && <div style={{ marginTop: 3 }}><b>Generated:</b> {new Date(form.pdf_generated_at).toLocaleString()}</div>}
+            {form.pdf_size && <div style={{ marginTop: 3 }}><b>PDF Size:</b> {(Number(form.pdf_size) / 1024 / 1024).toFixed(2)} MB</div>}
+          </div>
+        )}
       </div>
 
       <div ref={reportRef} style={reportShell}>
