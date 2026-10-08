@@ -1899,6 +1899,168 @@ function App() {
 
           </section>
 
+        ) : active === 'Assign' ? (
+
+          <section className="panel">
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+                marginBottom: 16
+              }}
+            >
+              <div>
+                <h2 style={{ marginBottom: 4 }}>Assign Cases</h2>
+                <p style={{ margin: 0 }}>
+                  Open cases ready for assignment and cases already assigned to a TPA.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="primary"
+                onClick={loadCases}
+                disabled={loading}
+              >
+                <RefreshCw size={16} />
+                {loading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+
+            {dbError && (
+              <div
+                className="panel"
+                style={{
+                  marginBottom: 16,
+                  border: '1px solid #fecaca',
+                  background: '#fff1f2'
+                }}
+              >
+                <strong>Database connection error</strong>
+                <p>{dbError}</p>
+              </div>
+            )}
+
+            {loading ? (
+              <p>Loading cases from Supabase...</p>
+            ) : (
+              <>
+                <h3 style={{ marginBottom: 10 }}>Ready to Assign</h3>
+                {cases.filter(item => String(item.status || '').trim().toUpperCase() === 'OPEN').length === 0 ? (
+                  <div
+                    style={{
+                      padding: 18,
+                      marginBottom: 24,
+                      textAlign: 'center',
+                      border: '1px dashed #cbd5e1',
+                      borderRadius: 12
+                    }}
+                  >
+                    No OPEN cases are waiting for assignment.
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto', marginBottom: 28 }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Lead ID</th>
+                          <th>Customer</th>
+                          <th>Registration No.</th>
+                          <th>Vehicle</th>
+                          <th>Status</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cases
+                          .filter(item => String(item.status || '').trim().toUpperCase() === 'OPEN')
+                          .map(item => (
+                            <tr key={item.id}>
+                              <td><strong>CASE-{item.case_id}</strong></td>
+                              <td>{item.customer_name || '—'}</td>
+                              <td>{item.registration_number || '—'}</td>
+                              <td>{[item.make, item.model, item.variant].filter(Boolean).join(' ') || '—'}</td>
+                              <td><span className="status">OPEN</span></td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="primary"
+                                  onClick={() => {
+                                    setAssignCase(item)
+                                    setAssignTpaId('')
+                                    setAssignReason('')
+                                    setAssignRemarks('')
+                                    setActionError('')
+                                  }}
+                                >
+                                  Assign TPA
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <h3 style={{ marginBottom: 10 }}>Assigned Cases</h3>
+                {cases.filter(item => {
+                  const status = String(item.status || '').trim().toUpperCase()
+                  return status === 'ASSIGNED' || status === 'REASSIGNED'
+                }).length === 0 ? (
+                  <div
+                    style={{
+                      padding: 18,
+                      textAlign: 'center',
+                      border: '1px dashed #cbd5e1',
+                      borderRadius: 12
+                    }}
+                  >
+                    No assigned cases found.
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Lead ID</th>
+                          <th>Customer</th>
+                          <th>Registration No.</th>
+                          <th>Vehicle</th>
+                          <th>Current TPA</th>
+                          <th>Status</th>
+                          <th>Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cases
+                          .filter(item => {
+                            const status = String(item.status || '').trim().toUpperCase()
+                            return status === 'ASSIGNED' || status === 'REASSIGNED'
+                          })
+                          .map(item => (
+                            <tr key={item.id}>
+                              <td><strong>CASE-{item.case_id}</strong></td>
+                              <td>{item.customer_name || '—'}</td>
+                              <td>{item.registration_number || '—'}</td>
+                              <td>{[item.make, item.model, item.variant].filter(Boolean).join(' ') || '—'}</td>
+                              <td>{item.assigned_tpa_name || '—'}</td>
+                              <td><span className="status">{displayStatus(item.status)}</span></td>
+                              <td>{formatDate(item.created_at)}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+
+          </section>
+
         ) : (
 
           <section className="panel empty">
