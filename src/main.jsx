@@ -235,14 +235,13 @@ function App() {
     try {
       const tpa = tpas.find(item => String(item.id) === String(assignTpaId))
 
-      if (!tpa) throw new Error('Selected TPA is not available.')
+      if (!tpa) {
+        throw new Error('Selected TPA is not available.')
+      }
 
-      // Do not use .single() here. Supabase can return
-      // "Cannot coerce the result to a single JSON object" when the
-      // UPDATE returns zero rows (for example because an RLS policy
-      // prevents the updated row from being returned).
-      // Read the result as an array and explicitly verify that the
-      // selected OPEN case was updated.
+      // STEP 1: Assign the case. This is the source of truth for success.
+      // We deliberately do not use .single() because RLS can make a successful
+      // update return an empty representation.
       const { data: updatedCases, error: caseError } = await supabase
         .from('cases')
         .update({
@@ -254,7 +253,9 @@ function App() {
         .eq('status', 'OPEN')
         .select('id, case_id, status, assigned_tpa_id, assigned_tpa_name')
 
-      if (caseError) throw new Error(caseError.message)
+      if (caseError) {
+        throw new Error(caseError.message)
+      }
 
       if (!updatedCases || updatedCases.length !== 1) {
         throw new Error(
@@ -262,42 +263,60 @@ function App() {
         )
       }
 
-      // The current app does not have a Supabase Auth user row yet.
-      // Therefore UUID columns must remain NULL; display identity is stored
-      // in the corresponding text columns instead of sending a name into UUID.
+      // STEP 2: Write assignment history as a non-blocking audit operation.
+      // The assignment itself must not be reported as failed just because a
+      // history/audit insert is unavailable. UUID fields stay NULL because the
+      // current app has no Supabase Auth user UUID; display identity goes into
+      // the text fields.
+      const historyPayload = {
+        case_id: assignCase.case_id,
+        old_tpa: null,
+        new_tpa: tpa.name,
+        assigned_by: null,
+        assigned_by_name: 'SS Sundar Singh',
+        assigned_by_role: 'Admin',
+        role: 'Admin',
+        reason: assignReason.trim() || null,
+        remarks: assignRemarks.trim() || null
+      }
+
       const { error: historyError } = await supabase
         .from('assignment_history')
-        .insert({
-          case_id: assignCase.case_id,
-          old_tpa: null,
-          new_tpa: tpa.name,
-          assigned_by: null,
-          assigned_by_name: 'SS Sundar Singh',
-          assigned_by_role: 'Admin',
-          role: 'Admin',
-          reason: assignReason.trim() || null,
-          remarks: assignRemarks.trim() || null
-        })
+        .insert(historyPayload)
 
-      if (historyError) throw new Error(historyError.message)
+      // STEP 3: Write audit trail independently. One logging failure must not
+      // make a successfully assigned case appear to have failed.
+      const auditPayload = {
+        case_id: assignCase.case_id,
+        user_id: null,
+        user_name: 'SS Sundar Singh',
+        role: 'Admin',
+        action: 'Assigned',
+        stage: 'OPEN',
+        old_status: 'OPEN',
+        new_status: 'ASSIGNED',
+        reason: assignReason.trim() || null,
+        remarks: assignRemarks.trim() || null
+      }
 
       const { error: auditError } = await supabase
         .from('audit_trail')
-        .insert({
-          case_id: assignCase.case_id,
-          user_id: null,
-          user_name: 'SS Sundar Singh',
-          role: 'Admin',
-          action: 'Assigned',
-          stage: 'OPEN',
-          old_status: 'OPEN',
-          new_status: 'ASSIGNED',
-          reason: assignReason.trim() || null,
-          remarks: assignRemarks.trim() || null
-        })
+        .insert(auditPayload)
 
-      if (auditError) throw new Error(auditError.message)
+      // Logging errors are intentionally console-only for now. The database
+      // case status remains the authoritative assignment result. This avoids
+      // the previous false "Unable to assign case" / "Failed to fetch" message
+      // after the case had already moved to ASSIGNED.
+      if (historyError) {
+        console.warn('Assignment history could not be saved:', historyError)
+      }
 
+      if (auditError) {
+        console.warn('Audit trail could not be saved:', auditError)
+      }
+
+      // STEP 4: Close the modal and refresh the live case lists only after the
+      // case update itself has succeeded.
       setAssignCase(null)
       setAssignTpaId('')
       setAssignReason('')
