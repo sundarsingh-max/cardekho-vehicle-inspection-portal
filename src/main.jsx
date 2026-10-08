@@ -4,12 +4,7 @@ import {
   Bell,
   Database,
   Eye,
-  X,
-  Pencil,
-  History,
-  RefreshCw,
-  UserPlus,
-  MessageSquare
+  X
 } from 'lucide-react'
 import { supabase } from './supabaseClient'
 import './styles.css'
@@ -40,16 +35,6 @@ function App() {
   const [active, setActive] = useState('Dashboard')
   const [add, setAdd] = useState(false)
   const [hist, setHist] = useState(false)
-  const [selectedCase, setSelectedCase] = useState(null)
-  const [editCase, setEditCase] = useState(null)
-  const [assignCase, setAssignCase] = useState(null)
-  const [remarkCase, setRemarkCase] = useState(null)
-  const [rejectCase, setRejectCase] = useState(null)
-  const [rejectReason, setRejectReason] = useState('')
-  const [rejectRemarks, setRejectRemarks] = useState('')
-  const [remarkText, setRemarkText] = useState('')
-  const [actionError, setActionError] = useState('')
-  const [actionSaving, setActionSaving] = useState(false)
 
   const [cases, setCases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -60,23 +45,6 @@ function App() {
   const [clients, setClients] = useState([])
   const [mmv, setMmv] = useState([])
   const [locations, setLocations] = useState([])
-  const [tpas, setTpas] = useState([])
-  const [tpaModal, setTpaModal] = useState(false)
-  const [tpaSaving, setTpaSaving] = useState(false)
-  const [tpaError, setTpaError] = useState('')
-  const [tpaForm, setTpaForm] = useState({
-    name: '',
-    mobile: '',
-    email: '',
-    location: '',
-    zone: '',
-    state: '',
-    client_mapping: '',
-    is_active: true
-  })
-  const [assignTpaId, setAssignTpaId] = useState('')
-  const [assignReason, setAssignReason] = useState('')
-  const [assignRemarks, setAssignRemarks] = useState('')
 
   const [masterLoading, setMasterLoading] = useState(false)
 
@@ -105,7 +73,6 @@ function App() {
   useEffect(() => {
     loadCases()
     loadMasters()
-    loadTpas()
   }, [])
 
   async function loadCases() {
@@ -127,151 +94,6 @@ function App() {
     }
 
     setLoading(false)
-  }
-
-  async function loadTpas() {
-    const { data, error } = await supabase
-      .from('tpa_master')
-      .select('*')
-      .order('name', { ascending: true })
-
-    if (error) {
-      console.error('TPA master error:', error)
-      setTpas([])
-    } else {
-      setTpas(data || [])
-    }
-  }
-
-  function resetTpaForm() {
-    setTpaForm({
-      name: '',
-      mobile: '',
-      email: '',
-      location: '',
-      zone: '',
-      state: '',
-      client_mapping: '',
-      is_active: true
-    })
-    setTpaError('')
-  }
-
-  async function saveTpa() {
-    const name = tpaForm.name.trim()
-    const mobile = tpaForm.mobile.trim()
-
-    if (!name) {
-      setTpaError('TPA Name is mandatory.')
-      return
-    }
-
-    if (!/^\\d{10}$/.test(mobile)) {
-      setTpaError('Enter a valid 10 digit mobile number.')
-      return
-    }
-
-    setTpaSaving(true)
-    setTpaError('')
-
-    try {
-      const { error } = await supabase
-        .from('tpa_master')
-        .insert({
-          name,
-          mobile,
-          email: tpaForm.email.trim() || null,
-          location: tpaForm.location.trim() || null,
-          zone: tpaForm.zone.trim() || null,
-          state: tpaForm.state.trim() || null,
-          client_mapping: tpaForm.client_mapping.trim() || null,
-          is_active: Boolean(tpaForm.is_active)
-        })
-
-      if (error) throw new Error(error.message)
-
-      await loadTpas()
-      setTpaModal(false)
-      resetTpaForm()
-    } catch (error) {
-      setTpaError(error?.message || 'Unable to save TPA.')
-    } finally {
-      setTpaSaving(false)
-    }
-  }
-
-  async function assignCaseToTpa() {
-    if (!assignCase) {
-      setActionError('No case selected.')
-      return
-    }
-
-    if (!assignTpaId) {
-      setActionError('Please select an active TPA.')
-      return
-    }
-
-    setActionSaving(true)
-    setActionError('')
-
-    try {
-      const tpa = tpas.find(item => String(item.id) === String(assignTpaId))
-
-      if (!tpa) throw new Error('Selected TPA is not available.')
-
-      const { data: updatedCase, error: caseError } = await supabase
-        .from('cases')
-        .update({
-          status: 'ASSIGNED',
-          assigned_tpa_id: tpa.id,
-          assigned_tpa_name: tpa.name
-        })
-        .eq('id', assignCase.id)
-        .eq('status', 'OPEN')
-        .select()
-        .single()
-
-      if (caseError) throw new Error(caseError.message)
-
-      const { error: historyError } = await supabase
-        .from('assignment_history')
-        .insert({
-          case_id: assignCase.case_id,
-          old_tpa: null,
-          new_tpa: tpa.name,
-          assigned_by: 'SS Sundar Singh',
-          role: 'Admin',
-          reason: assignReason.trim() || null,
-          remarks: assignRemarks.trim() || null
-        })
-
-      if (historyError) throw new Error(historyError.message)
-
-      const { error: auditError } = await supabase
-        .from('audit_trail')
-        .insert({
-          case_id: assignCase.case_id,
-          action: 'Assigned',
-          stage: 'OPEN',
-          old_status: 'OPEN',
-          new_status: 'ASSIGNED',
-          reason: assignReason.trim() || null,
-          remarks: assignRemarks.trim() || null
-        })
-
-      if (auditError) throw new Error(auditError.message)
-
-      setAssignCase(null)
-      setAssignTpaId('')
-      setAssignReason('')
-      setAssignRemarks('')
-      await loadCases()
-    } catch (error) {
-      console.error('Assign case error:', error)
-      setActionError(error?.message || 'Unable to assign case.')
-    } finally {
-      setActionSaving(false)
-    }
   }
 
   async function loadMasters() {
@@ -375,42 +197,47 @@ function App() {
       .slice(0, 20)
   }, [cases, search])
 
-  const segments = useMemo(() => {
-    return [
-      'CAR',
-      'CV',
-      'FE',
-      '3WLR',
-      '2WLR',
-      'CE'
-    ]
-  }, [])
+  const segments = [
+    'CAR',
+    'CV',
+    'FE',
+    '3WLR',
+    '2WLR',
+    'CE'
+  ]
 
-  // MMV master now contains a real `segment` column.
-  // Always filter by Segment first; never fall back to all makes.
-  const mmvRowsForSelection = useMemo(() => {
-    if (!form.segment) return []
-
-    const selectedSegment = String(form.segment)
-      .trim()
-      .toUpperCase()
-
-    return mmv.filter(row => {
-      const rowSegment = String(
+  const mmvHasSegment = useMemo(() => {
+    return mmv.some(row =>
+      String(
         firstValue(row, [
           'segment',
-          'SEGMENT',
           'Segment',
+          'SEGMENT',
           'vehicle_segment',
           'VEHICLE_SEGMENT'
         ]) || ''
-      )
-        .trim()
-        .toUpperCase()
+      ).trim() !== ''
+    )
+  }, [mmv])
 
-      return rowSegment === selectedSegment
+  const mmvRowsForSelection = useMemo(() => {
+    return mmv.filter(row => {
+      const rowSegment = firstValue(row, [
+        'segment',
+        'Segment',
+        'SEGMENT',
+        'vehicle_segment',
+        'VEHICLE_SEGMENT'
+      ])
+
+      if (!form.segment || !mmvHasSegment) return true
+
+      return (
+        String(rowSegment || '').trim().toUpperCase() ===
+        String(form.segment).trim().toUpperCase()
+      )
     })
-  }, [mmv, form.segment])
+  }, [mmv, mmvHasSegment, form.segment])
 
   const makes = useMemo(() => {
     return uniqueValues(
@@ -421,84 +248,75 @@ function App() {
           'Make'
         ])
       )
-    ).sort((a, b) => a.localeCompare(b))
+    )
   }, [mmvRowsForSelection])
-
-  const mmvRowsForSelectedMake = useMemo(() => {
-    if (!form.segment || !form.make) return []
-
-    const selectedMake = String(form.make)
-      .trim()
-      .toUpperCase()
-
-    return mmvRowsForSelection.filter(row => {
-      const rowMake = String(
-        firstValue(row, [
-          'make',
-          'MAKE',
-          'Make'
-        ]) || ''
-      )
-        .trim()
-        .toUpperCase()
-
-      return rowMake === selectedMake
-    })
-  }, [mmvRowsForSelection, form.make, form.segment])
 
   const models = useMemo(() => {
     return uniqueValues(
-      mmvRowsForSelectedMake.map(row =>
-        firstValue(row, [
-          'model',
-          'MODEL',
-          'Model'
-        ])
-      )
-    ).sort((a, b) => a.localeCompare(b))
-  }, [mmvRowsForSelectedMake])
+      mmvRowsForSelection
+        .filter(row => {
+          const rowMake = firstValue(row, [
+            'make',
+            'MAKE',
+            'Make'
+          ])
 
-  const mmvRowsForSelectedModel = useMemo(() => {
-    if (!form.segment || !form.make || !form.model) return []
-
-    const selectedModel = String(form.model)
-      .trim()
-      .toUpperCase()
-
-    return mmvRowsForSelectedMake.filter(row => {
-      const rowModel = String(
-        firstValue(row, [
-          'model',
-          'MODEL',
-          'Model'
-        ]) || ''
-      )
-        .trim()
-        .toUpperCase()
-
-      return rowModel === selectedModel
-    })
-  }, [mmvRowsForSelectedMake, form.model, form.make, form.segment])
+          return (
+            !form.make ||
+            String(rowMake || '').trim().toUpperCase() ===
+              String(form.make).trim().toUpperCase()
+          )
+        })
+        .map(row =>
+          firstValue(row, [
+            'model',
+            'MODEL',
+            'Model'
+          ])
+        )
+    )
+  }, [mmvRowsForSelection, form.make])
 
   const variants = useMemo(() => {
     return uniqueValues(
-      mmvRowsForSelectedModel.map(row =>
-        firstValue(row, [
-          'variant',
-          'VARIANT',
-          'Variant'
-        ])
-      )
-    ).sort((a, b) => a.localeCompare(b))
-  }, [mmvRowsForSelectedModel])
+      mmvRowsForSelection
+        .filter(row => {
+          const rowMake = firstValue(row, [
+            'make',
+            'MAKE',
+            'Make'
+          ])
 
-  // Manufacturing Year is independent of MMV rows.
-  // It starts at 2010 and automatically includes the current year.
+          const rowModel = firstValue(row, [
+            'model',
+            'MODEL',
+            'Model'
+          ])
+
+          return (
+            (!form.make ||
+              String(rowMake || '').trim().toUpperCase() ===
+                String(form.make).trim().toUpperCase()) &&
+            (!form.model ||
+              String(rowModel || '').trim().toUpperCase() ===
+                String(form.model).trim().toUpperCase())
+          )
+        })
+        .map(row =>
+          firstValue(row, [
+            'variant',
+            'VARIANT',
+            'Variant'
+          ])
+        )
+    )
+  }, [mmvRowsForSelection, form.make, form.model])
+
   const years = useMemo(() => {
     const currentYear = new Date().getFullYear()
     const result = []
 
-    for (let year = currentYear; year >= 2010; year--) {
+    for (let year = currentYear; year >= 2000; year--) {
       result.push(String(year))
     }
 
@@ -772,237 +590,6 @@ function App() {
     return lastCaseId + 1
   }
 
-  function openEditLead(item) {
-    setSelectedCase(item)
-    setEditCase(item)
-    setFormError('')
-    setFormSuccess('')
-    setForm({
-      loan_number: item.loan_number || '',
-      bank_executive_name: item.bank_executive_name || '',
-      bank_executive_mobile: item.bank_executive_mobile || '',
-      customer_name: item.customer_name || '',
-      mobile_phone: item.mobile_phone || '',
-      registration_number: item.registration_number || '',
-      client_id: item.client_id || '',
-      segment: item.segment || '',
-      make: item.make || '',
-      model: item.model || '',
-      variant: item.variant || '',
-      mfg_year: item.mfg_year ? String(item.mfg_year) : '',
-      zone: item.zone || '',
-      state: item.state || '',
-      city: item.city || ''
-    })
-    setAdd(true)
-  }
-
-  function closeLeadForm() {
-    if (savingLead) return
-    setAdd(false)
-    setEditCase(null)
-    setSelectedCase(null)
-    setFormError('')
-    setFormSuccess('')
-    setForm({
-      loan_number: '',
-      bank_executive_name: '',
-      bank_executive_mobile: '',
-      customer_name: '',
-      mobile_phone: '',
-      registration_number: '',
-      client_id: '',
-      segment: '',
-      make: '',
-      model: '',
-      variant: '',
-      mfg_year: '',
-      zone: '',
-      state: '',
-      city: ''
-    })
-  }
-
-  async function updateLead(event) {
-    event.preventDefault()
-    setFormError('')
-    setFormSuccess('')
-
-    const validationError = validateLead()
-    if (validationError) {
-      setFormError(validationError)
-      return
-    }
-
-    if (!editCase) {
-      setFormError('No lead selected for editing.')
-      return
-    }
-
-    setSavingLead(true)
-
-    try {
-      const payload = {
-        loan_number: form.loan_number.trim() || null,
-        bank_executive_name: form.bank_executive_name.trim(),
-        bank_executive_mobile: form.bank_executive_mobile.trim(),
-        customer_name: form.customer_name.trim(),
-        mobile_phone: form.mobile_phone.trim(),
-        registration_number: form.registration_number.trim().toUpperCase(),
-        client_id: form.client_id,
-        segment: form.segment,
-        make: form.make,
-        model: form.model,
-        variant: form.variant,
-        mfg_year: Number(form.mfg_year),
-        zone: form.zone,
-        state: form.state,
-        city: form.city
-      }
-
-      const { data, error } = await supabase
-        .from('cases')
-        .update(payload)
-        .eq('id', editCase.id)
-        .select()
-        .single()
-
-      if (error) {
-        console.error('Update lead error:', error)
-        throw new Error(error.message)
-      }
-
-      setFormSuccess(
-        `Lead updated successfully. Case ID: CASE-${data.case_id}`
-      )
-      await loadCases()
-    } catch (error) {
-      setFormError(
-        error?.message || 'Unable to update lead.'
-      )
-    } finally {
-      setSavingLead(false)
-    }
-  }
-
-  function openAssignCase(item) {
-    setActionError('')
-    setAssignTpaId('')
-    setAssignReason('')
-    setAssignRemarks('')
-    setAssignCase(item)
-  }
-
-  function openRemarkCase(item) {
-    setActionError('')
-    setRemarkText('')
-    setRemarkCase(item)
-  }
-
-  function openRejectCase(item) {
-    setActionError('')
-    setRejectReason('')
-    setRejectRemarks('')
-    setRejectCase(item)
-  }
-
-  async function rejectOpenCase() {
-    if (!rejectCase) {
-      setActionError('No case selected.')
-      return
-    }
-
-    const reason = rejectReason.trim()
-    const remarks = rejectRemarks.trim()
-
-    if (!reason) {
-      setActionError('Reject reason is mandatory.')
-      return
-    }
-
-    setActionSaving(true)
-    setActionError('')
-
-    try {
-      const { data, error } = await supabase
-        .from('cases')
-        .update({ status: 'REJECTED' })
-        .eq('id', rejectCase.id)
-        .eq('status', 'OPEN')
-        .select()
-        .single()
-
-      if (error) throw new Error(error.message)
-
-      const { error: auditError } = await supabase
-        .from('audit_trail')
-        .insert({
-          case_id: rejectCase.case_id,
-          action: 'Rejected',
-          stage: 'OPEN',
-          old_status: 'OPEN',
-          new_status: 'REJECTED',
-          reason,
-          remarks: remarks || null
-        })
-
-      if (auditError) throw new Error(auditError.message)
-
-      setRejectCase(null)
-      setRejectReason('')
-      setRejectRemarks('')
-      await loadCases()
-    } catch (error) {
-      console.error('Reject lead error:', error)
-      setActionError(error?.message || 'Unable to reject lead.')
-    } finally {
-      setActionSaving(false)
-    }
-  }
-
-  async function saveRemark() {
-    const text = remarkText.trim()
-
-    if (!remarkCase) {
-      setActionError('No case selected.')
-      return
-    }
-
-    if (!text) {
-      setActionError('Please enter remarks.')
-      return
-    }
-
-    setActionSaving(true)
-    setActionError('')
-
-    try {
-      const { error } = await supabase
-        .from('audit_trail')
-        .insert({
-          case_id: remarkCase.case_id,
-          action: 'Remark Added',
-          stage: 'OPEN',
-          old_status: remarkCase.status || 'OPEN',
-          new_status: remarkCase.status || 'OPEN',
-          remarks: text
-        })
-
-      if (error) throw new Error(error.message)
-
-      setRemarkCase(null)
-      setRemarkText('')
-      await loadCases()
-    } catch (error) {
-      setActionError(
-        error?.message || 'Unable to save remarks.'
-      )
-    } finally {
-      setActionSaving(false)
-    }
-  }
-
-  
   async function saveLead(event) {
     event.preventDefault()
 
@@ -1552,308 +1139,29 @@ function App() {
             </section>
 
           </>
-        ) : active === 'TPA Master' ? (
-
-          <section className="panel">
-
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 16,
-                gap: 12
-              }}
-            >
-              <div>
-                <h2 style={{ marginBottom: 4 }}>TPA Master</h2>
-                <p style={{ margin: 0 }}>
-                  Manage TPA users available for case assignment.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                className="primary"
-                onClick={() => {
-                  resetTpaForm()
-                  setTpaModal(true)
-                }}
-              >
-                ＋ Add TPA
-              </button>
-            </div>
-
-            <div style={{ overflowX: 'auto' }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>TPA Name</th>
-                    <th>Mobile</th>
-                    <th>Email</th>
-                    <th>Location</th>
-                    <th>Zone</th>
-                    <th>State</th>
-                    <th>Client Mapping</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tpas.length === 0 ? (
-                    <tr>
-                      <td colSpan="8" style={{ textAlign: 'center', padding: 28 }}>
-                        No TPA records found. Click Add TPA to create the first active TPA.
-                      </td>
-                    </tr>
-                  ) : (
-                    tpas.map(tpa => (
-                      <tr key={tpa.id}>
-                        <td><strong>{tpa.name}</strong></td>
-                        <td>{tpa.mobile || '—'}</td>
-                        <td>{tpa.email || '—'}</td>
-                        <td>{tpa.location || '—'}</td>
-                        <td>{tpa.zone || '—'}</td>
-                        <td>{tpa.state || '—'}</td>
-                        <td>{tpa.client_mapping || 'All Clients'}</td>
-                        <td>
-                          <span className="status">
-                            {tpa.is_active ? 'ACTIVE' : 'INACTIVE'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-          </section>
-
         ) : active === 'Add Lead' ? (
 
           <section className="panel empty">
 
             <Database />
 
-            <h2>Add Lead</h2>
+            <h2>
+              Add Lead
+            </h2>
 
             <p>
-              Create a new vehicle inspection case.
+              Create a new vehicle
+              inspection case.
             </p>
 
             <button
               className="primary"
-              onClick={() => {
-                setEditCase(null)
-                setFormError('')
-                setFormSuccess('')
+              onClick={() =>
                 setAdd(true)
-              }}
+              }
             >
               ＋ Add Lead
             </button>
-
-          </section>
-
-        ) : active === 'Open Lead' ? (
-
-          <section className="panel">
-
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 12,
-                marginBottom: 16
-              }}
-            >
-              <div>
-                <h2 style={{ marginBottom: 4 }}>
-                  Open Leads
-                </h2>
-                <p style={{ margin: 0 }}>
-                  Live OPEN cases from Supabase
-                </p>
-              </div>
-
-              <button
-                type="button"
-                className="primary"
-                onClick={loadCases}
-                disabled={loading}
-              >
-                <RefreshCw size={16} />
-                {loading ? 'Refreshing...' : 'Refresh'}
-              </button>
-            </div>
-
-            {dbError && (
-              <div
-                className="panel"
-                style={{
-                  marginBottom: 16,
-                  border: '1px solid #fecaca',
-                  background: '#fff1f2'
-                }}
-              >
-                <strong>Database connection error</strong>
-                <p>{dbError}</p>
-              </div>
-            )}
-
-            {loading ? (
-              <p>Loading leads from Supabase...</p>
-            ) : recentCases.filter(
-                item =>
-                  String(item.status || 'OPEN').toUpperCase() === 'OPEN'
-              ).length === 0 ? (
-              <div
-                style={{
-                  padding: 28,
-                  textAlign: 'center',
-                  border: '1px dashed #cbd5e1',
-                  borderRadius: 12
-                }}
-              >
-                <Database size={38} />
-                <h3>No Open Leads Found</h3>
-                <p>
-                  Create a lead from Add Lead and it will
-                  appear here automatically.
-                </p>
-              </div>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Lead ID</th>
-                      <th>Customer</th>
-                      <th>Registration No.</th>
-                      <th>Vehicle</th>
-                      <th>Loan Number</th>
-                      <th>Bank Executive</th>
-                      <th>Status</th>
-                      <th>Date</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {recentCases
-                      .filter(
-                        item =>
-                          String(item.status || 'OPEN').toUpperCase() ===
-                          'OPEN'
-                      )
-                      .map(item => (
-                        <tr key={item.id}>
-                          <td>
-                            <strong>CASE-{item.case_id}</strong>
-                          </td>
-
-                          <td>
-                            {item.customer_name || '—'}
-                            <br />
-                            <small>{item.mobile_phone || ''}</small>
-                          </td>
-
-                          <td>
-                            {item.registration_number || '—'}
-                          </td>
-
-                          <td>
-                            {[
-                              item.make,
-                              item.model,
-                              item.variant
-                            ]
-                              .filter(Boolean)
-                              .join(' ') || '—'}
-                          </td>
-
-                          <td>{item.loan_number || '—'}</td>
-
-                          <td>
-                            {item.bank_executive_name || '—'}
-                            <br />
-                            <small>
-                              {item.bank_executive_mobile || ''}
-                            </small>
-                          </td>
-
-                          <td>
-                            <span className="status">
-                              {displayStatus(item.status)}
-                            </span>
-                          </td>
-
-                          <td>{formatDate(item.created_at)}</td>
-
-                          <td>
-                            <div
-                              style={{
-                                display: 'flex',
-                                gap: 6,
-                                flexWrap: 'wrap'
-                              }}
-                            >
-                              <button
-                                type="button"
-                                title="Edit Lead"
-                                aria-label="Edit Lead"
-                                onClick={() => openEditLead(item)}
-                              >
-                                <Pencil size={16} />
-                              </button>
-
-                              <button
-                                type="button"
-                                title="History"
-                                aria-label="History"
-                                onClick={() => {
-                                  setSelectedCase(item)
-                                  setHist(true)
-                                }}
-                              >
-                                <History size={16} />
-                              </button>
-
-                              <button
-                                type="button"
-                                title="Assign"
-                                aria-label="Assign"
-                                onClick={() => openAssignCase(item)}
-                              >
-                                <UserPlus size={16} />
-                              </button>
-
-                              <button
-                                type="button"
-                                title="Add Remarks"
-                                aria-label="Add Remarks"
-                                onClick={() => openRemarkCase(item)}
-                              >
-                                <MessageSquare size={16} />
-                              </button>
-
-                              <button
-                                type="button"
-                                title="Reject Lead"
-                                aria-label="Reject Lead"
-                                onClick={() => openRejectCase(item)}
-                              >
-                                <X size={16} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
 
           </section>
 
@@ -1863,18 +1171,20 @@ function App() {
 
             <Database />
 
-            <h2>{active}</h2>
+            <h2>
+              {active}
+            </h2>
 
             <p>
-              Module ready for the next implementation stage.
+              Module ready for the
+              next implementation stage.
             </p>
 
             <button
               className="primary"
-              onClick={() => {
-                setEditCase(null)
+              onClick={() =>
                 setAdd(true)
-              }}
+              }
             >
               ＋ Add Lead
             </button>
@@ -1886,13 +1196,19 @@ function App() {
         {add && (
 
           <Modal
-            title={editCase ? 'Edit Lead' : 'Add Lead'}
-            close={closeLeadForm}
+            title="Add Lead"
+            close={() => {
+              if (!savingLead) {
+                setAdd(false)
+                setFormError('')
+                setFormSuccess('')
+              }
+            }}
           >
 
             <form
               className="form"
-              onSubmit={editCase ? updateLead : saveLead}
+              onSubmit={saveLead}
             >
 
               {formError && (
@@ -1942,11 +1258,7 @@ function App() {
 
                 <Field
                   label="Case ID"
-                  value={
-                    editCase
-                      ? `CASE-${editCase.case_id}`
-                      : 'Auto-generated'
-                  }
+                  value="Auto-generated"
                   disabled
                 />
 
@@ -2354,7 +1666,9 @@ function App() {
                     background:
                       '#64748b'
                   }}
-                  onClick={closeLeadForm}
+                  onClick={() =>
+                    setAdd(false)
+                  }
                   disabled={savingLead}
                 >
                   Cancel
@@ -2366,8 +1680,8 @@ function App() {
                   disabled={savingLead}
                 >
                   {savingLead
-                    ? (editCase ? 'Updating Lead...' : 'Saving Lead...')
-                    : (editCase ? 'Update Lead' : 'Create Lead')}
+                    ? 'Saving Lead...'
+                    : 'Create Lead'}
                 </button>
 
               </div>
@@ -2377,404 +1691,33 @@ function App() {
           </Modal>
         )}
 
-        {assignCase && (
-          <Modal
-            title={`Assign Case — CASE-${assignCase.case_id}`}
-            close={() => {
-              if (!actionSaving) {
-                setAssignCase(null)
-                setActionError('')
-              }
-            }}
-          >
-            <div className="panel" style={{ marginBottom: 12 }}>
-              <strong>Assign OPEN Case</strong>
-              <p style={{ marginBottom: 0 }}>
-                Select an active TPA. The case will move to ASSIGNED immediately after confirmation.
-              </p>
-            </div>
-
-            {actionError && (
-              <div
-                className="panel"
-                style={{
-                  marginBottom: 12,
-                  border: '1px solid #fecaca',
-                  background: '#fff1f2'
-                }}
-              >
-                <strong>Unable to assign case</strong>
-                <p>{actionError}</p>
-              </div>
-            )}
-
-            <div className="form-grid">
-              <Field label="Case ID" value={`CASE-${assignCase.case_id}`} disabled />
-              <Field label="Customer" value={assignCase.customer_name || ''} disabled />
-              <Field label="Registration Number" value={assignCase.registration_number || ''} disabled />
-              <Field label="Current Status" value={displayStatus(assignCase.status)} disabled />
-
-              <label className="field">
-                <span>Active TPA <b style={{ color: '#dc2626' }}>*</b></span>
-                <select
-                  value={assignTpaId}
-                  onChange={e => setAssignTpaId(e.target.value)}
-                  required
-                >
-                  <option value="">Select TPA</option>
-                  {tpas
-                    .filter(tpa => tpa.is_active)
-                    .map(tpa => (
-                      <option key={tpa.id} value={tpa.id}>
-                        {tpa.name} — {tpa.mobile}
-                      </option>
-                    ))}
-                </select>
-              </label>
-
-              <label className="field">
-                <span>Reason</span>
-                <input
-                  value={assignReason}
-                  onChange={e => setAssignReason(e.target.value)}
-                  placeholder="Assignment reason"
-                />
-              </label>
-
-              <label className="field" style={{ width: '100%' }}>
-                <span>Remarks</span>
-                <textarea
-                  value={assignRemarks}
-                  onChange={e => setAssignRemarks(e.target.value)}
-                  placeholder="Assignment remarks"
-                  rows={3}
-                  style={{
-                    width: '100%',
-                    resize: 'vertical',
-                    padding: 10,
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 8,
-                    fontFamily: 'inherit'
-                  }}
-                />
-              </label>
-            </div>
-
-            {tpas.filter(tpa => tpa.is_active).length === 0 && (
-              <div
-                className="panel"
-                style={{
-                  marginTop: 12,
-                  border: '1px solid #fed7aa',
-                  background: '#fff7ed'
-                }}
-              >
-                <strong>No active TPA available.</strong>
-                <p>
-                  Add an active TPA in TPA Master before assigning this case.
-                </p>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
-              <button
-                type="button"
-                className="primary"
-                style={{ background: '#64748b' }}
-                onClick={() => setAssignCase(null)}
-                disabled={actionSaving}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={assignCaseToTpa}
-                disabled={actionSaving}
-              >
-                <UserPlus size={16} /> Assign TPA
-              </button>
-            </div>
-          </Modal>
-        )}
-
-        {rejectCase && (
-          <Modal
-            title={`Reject Lead — CASE-${rejectCase.case_id}`}
-            close={() => {
-              if (!actionSaving) {
-                setRejectCase(null)
-                setRejectReason('')
-                setRejectRemarks('')
-                setActionError('')
-              }
-            }}
-          >
-            {actionError && (
-              <div
-                className="panel"
-                style={{
-                  marginBottom: 12,
-                  border: '1px solid #fecaca',
-                  background: '#fff1f2'
-                }}
-              >
-                <strong>Unable to reject lead</strong>
-                <p>{actionError}</p>
-              </div>
-            )}
-
-            <div
-              className="panel"
-              style={{
-                marginBottom: 12,
-                border: '1px solid #fecaca',
-                background: '#fff7f7'
-              }}
-            >
-              <strong>Rejecting this OPEN lead</strong>
-              <p style={{ marginBottom: 0 }}>
-                The case will move from OPEN to REJECTED and the rejection
-                reason will be stored in the audit trail.
-              </p>
-            </div>
-
-            <div className="form-grid">
-              <Field
-                label="Case ID"
-                value={`CASE-${rejectCase.case_id}`}
-                disabled
-              />
-
-              <Field
-                label="Customer"
-                value={rejectCase.customer_name || ''}
-                disabled
-              />
-
-              <label className="field" style={{ width: '100%' }}>
-                <span>
-                  Reject Reason <b style={{ color: '#dc2626' }}>*</b>
-                </span>
-                <textarea
-                  value={rejectReason}
-                  onChange={e => setRejectReason(e.target.value)}
-                  placeholder="Enter mandatory rejection reason"
-                  rows={4}
-                  style={{
-                    width: '100%',
-                    resize: 'vertical',
-                    padding: 10,
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 8,
-                    fontFamily: 'inherit'
-                  }}
-                />
-              </label>
-
-              <label className="field" style={{ width: '100%' }}>
-                <span>Additional Remarks</span>
-                <textarea
-                  value={rejectRemarks}
-                  onChange={e => setRejectRemarks(e.target.value)}
-                  placeholder="Enter additional remarks (optional)"
-                  rows={4}
-                  style={{
-                    width: '100%',
-                    resize: 'vertical',
-                    padding: 10,
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 8,
-                    fontFamily: 'inherit'
-                  }}
-                />
-              </label>
-            </div>
-
-            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
-              <button
-                type="button"
-                className="primary"
-                style={{ background: '#64748b' }}
-                onClick={() => setRejectCase(null)}
-                disabled={actionSaving}
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                className="primary"
-                style={{ background: '#dc2626' }}
-                onClick={rejectOpenCase}
-                disabled={actionSaving}
-              >
-                {actionSaving ? 'Rejecting...' : 'Reject Lead'}
-              </button>
-            </div>
-          </Modal>
-        )}
-
-        {remarkCase && (
-          <Modal
-            title={`Add Remarks — CASE-${remarkCase.case_id}`}
-            close={() => {
-              if (!actionSaving) {
-                setRemarkCase(null)
-                setRemarkText('')
-                setActionError('')
-              }
-            }}
-          >
-            {actionError && (
-              <div
-                className="panel"
-                style={{
-                  marginBottom: 12,
-                  border: '1px solid #fecaca',
-                  background: '#fff1f2'
-                }}
-              >
-                <strong>Unable to save remarks</strong>
-                <p>{actionError}</p>
-              </div>
-            )}
-
-            <label className="field" style={{ width: '100%' }}>
-              <span>Remarks <b style={{ color: '#dc2626' }}>*</b></span>
-              <textarea
-                value={remarkText}
-                onChange={e => setRemarkText(e.target.value)}
-                placeholder="Enter remarks"
-                rows={6}
-                style={{
-                  width: '100%',
-                  resize: 'vertical',
-                  padding: 10,
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 8,
-                  fontFamily: 'inherit'
-                }}
-              />
-            </label>
-
-            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
-              <button
-                type="button"
-                className="primary"
-                style={{ background: '#64748b' }}
-                onClick={() => setRemarkCase(null)}
-                disabled={actionSaving}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={saveRemark}
-                disabled={actionSaving}
-              >
-                {actionSaving ? 'Saving...' : 'Save Remarks'}
-              </button>
-            </div>
-          </Modal>
-        )}
-
         {hist && (
 
           <Modal
-            title={
-              selectedCase
-                ? `Case Details — CASE-${selectedCase.case_id}`
-                : 'Case History'
-            }
-            close={() => {
+            title="Case History"
+            close={() =>
               setHist(false)
-              setSelectedCase(null)
-            }}
+            }
           >
 
             <div className="history">
 
-              {selectedCase ? (
-                <>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns:
-                        'repeat(2, minmax(0, 1fr))',
-                      gap: 12,
-                      marginBottom: 16
-                    }}
-                  >
-                    <div>
-                      <small>Customer</small>
-                      <strong>
-                        {selectedCase.customer_name || '—'}
-                      </strong>
-                    </div>
+              <p>
+                <b>
+                  History module
+                </b>
 
-                    <div>
-                      <small>Registration Number</small>
-                      <strong>
-                        {selectedCase.registration_number || '—'}
-                      </strong>
-                    </div>
-
-                    <div>
-                      <small>Vehicle</small>
-                      <strong>
-                        {[
-                          selectedCase.make,
-                          selectedCase.model,
-                          selectedCase.variant
-                        ]
-                          .filter(Boolean)
-                          .join(' ') || '—'}
-                      </strong>
-                    </div>
-
-                    <div>
-                      <small>Status</small>
-                      <strong>
-                        {displayStatus(selectedCase.status)}
-                      </strong>
-                    </div>
-
-                    <div>
-                      <small>Loan Number</small>
-                      <strong>
-                        {selectedCase.loan_number || '—'}
-                      </strong>
-                    </div>
-
-                    <div>
-                      <small>Created</small>
-                      <strong>
-                        {formatDate(selectedCase.created_at)}
-                      </strong>
-                    </div>
-                  </div>
-
-                  <p>
-                    <b>Audit Trail</b>
-                    <small>
-                      Detailed immutable audit events will be
-                      connected in the Audit Trail stage.
-                    </small>
-                  </p>
-                </>
-              ) : (
-                <p>No case selected.</p>
-              )}
+                <small>
+                  Full audit trail will
+                  be connected in the
+                  next stage.
+                </small>
+              </p>
 
             </div>
 
           </Modal>
-
         )}
-
-
 
       </main>
     </div>
