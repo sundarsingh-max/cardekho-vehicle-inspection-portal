@@ -7,7 +7,9 @@ import {
   X,
   Pencil,
   History,
-  RefreshCw
+  RefreshCw,
+  UserPlus,
+  MessageSquare
 } from 'lucide-react'
 import { supabase } from './supabaseClient'
 import './styles.css'
@@ -40,6 +42,14 @@ function App() {
   const [hist, setHist] = useState(false)
   const [selectedCase, setSelectedCase] = useState(null)
   const [editCase, setEditCase] = useState(null)
+  const [assignCase, setAssignCase] = useState(null)
+  const [remarkCase, setRemarkCase] = useState(null)
+  const [rejectCase, setRejectCase] = useState(null)
+  const [rejectReason, setRejectReason] = useState('')
+  const [rejectRemarks, setRejectRemarks] = useState('')
+  const [remarkText, setRemarkText] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [actionSaving, setActionSaving] = useState(false)
 
   const [cases, setCases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -50,6 +60,23 @@ function App() {
   const [clients, setClients] = useState([])
   const [mmv, setMmv] = useState([])
   const [locations, setLocations] = useState([])
+  const [tpas, setTpas] = useState([])
+  const [tpaModal, setTpaModal] = useState(false)
+  const [tpaSaving, setTpaSaving] = useState(false)
+  const [tpaError, setTpaError] = useState('')
+  const [tpaForm, setTpaForm] = useState({
+    name: '',
+    mobile: '',
+    email: '',
+    location: '',
+    zone: '',
+    state: '',
+    client_mapping: '',
+    is_active: true
+  })
+  const [assignTpaId, setAssignTpaId] = useState('')
+  const [assignReason, setAssignReason] = useState('')
+  const [assignRemarks, setAssignRemarks] = useState('')
 
   const [masterLoading, setMasterLoading] = useState(false)
 
@@ -78,6 +105,7 @@ function App() {
   useEffect(() => {
     loadCases()
     loadMasters()
+    loadTpas()
   }, [])
 
   async function loadCases() {
@@ -99,6 +127,151 @@ function App() {
     }
 
     setLoading(false)
+  }
+
+  async function loadTpas() {
+    const { data, error } = await supabase
+      .from('tpa_master')
+      .select('*')
+      .order('name', { ascending: true })
+
+    if (error) {
+      console.error('TPA master error:', error)
+      setTpas([])
+    } else {
+      setTpas(data || [])
+    }
+  }
+
+  function resetTpaForm() {
+    setTpaForm({
+      name: '',
+      mobile: '',
+      email: '',
+      location: '',
+      zone: '',
+      state: '',
+      client_mapping: '',
+      is_active: true
+    })
+    setTpaError('')
+  }
+
+  async function saveTpa() {
+    const name = tpaForm.name.trim()
+    const mobile = tpaForm.mobile.trim()
+
+    if (!name) {
+      setTpaError('TPA Name is mandatory.')
+      return
+    }
+
+    if (!/^\\d{10}$/.test(mobile)) {
+      setTpaError('Enter a valid 10 digit mobile number.')
+      return
+    }
+
+    setTpaSaving(true)
+    setTpaError('')
+
+    try {
+      const { error } = await supabase
+        .from('tpa_master')
+        .insert({
+          name,
+          mobile,
+          email: tpaForm.email.trim() || null,
+          location: tpaForm.location.trim() || null,
+          zone: tpaForm.zone.trim() || null,
+          state: tpaForm.state.trim() || null,
+          client_mapping: tpaForm.client_mapping.trim() || null,
+          is_active: Boolean(tpaForm.is_active)
+        })
+
+      if (error) throw new Error(error.message)
+
+      await loadTpas()
+      setTpaModal(false)
+      resetTpaForm()
+    } catch (error) {
+      setTpaError(error?.message || 'Unable to save TPA.')
+    } finally {
+      setTpaSaving(false)
+    }
+  }
+
+  async function assignCaseToTpa() {
+    if (!assignCase) {
+      setActionError('No case selected.')
+      return
+    }
+
+    if (!assignTpaId) {
+      setActionError('Please select an active TPA.')
+      return
+    }
+
+    setActionSaving(true)
+    setActionError('')
+
+    try {
+      const tpa = tpas.find(item => String(item.id) === String(assignTpaId))
+
+      if (!tpa) throw new Error('Selected TPA is not available.')
+
+      const { data: updatedCase, error: caseError } = await supabase
+        .from('cases')
+        .update({
+          status: 'ASSIGNED',
+          assigned_tpa_id: tpa.id,
+          assigned_tpa_name: tpa.name
+        })
+        .eq('id', assignCase.id)
+        .eq('status', 'OPEN')
+        .select()
+        .single()
+
+      if (caseError) throw new Error(caseError.message)
+
+      const { error: historyError } = await supabase
+        .from('assignment_history')
+        .insert({
+          case_id: assignCase.case_id,
+          old_tpa: null,
+          new_tpa: tpa.name,
+          assigned_by: 'SS Sundar Singh',
+          role: 'Admin',
+          reason: assignReason.trim() || null,
+          remarks: assignRemarks.trim() || null
+        })
+
+      if (historyError) throw new Error(historyError.message)
+
+      const { error: auditError } = await supabase
+        .from('audit_trail')
+        .insert({
+          case_id: assignCase.case_id,
+          action: 'Assigned',
+          stage: 'OPEN',
+          old_status: 'OPEN',
+          new_status: 'ASSIGNED',
+          reason: assignReason.trim() || null,
+          remarks: assignRemarks.trim() || null
+        })
+
+      if (auditError) throw new Error(auditError.message)
+
+      setAssignCase(null)
+      setAssignTpaId('')
+      setAssignReason('')
+      setAssignRemarks('')
+      await loadCases()
+    } catch (error) {
+      console.error('Assign case error:', error)
+      setActionError(error?.message || 'Unable to assign case.')
+    } finally {
+      setActionSaving(false)
+    }
   }
 
   async function loadMasters() {
@@ -202,40 +375,19 @@ function App() {
       .slice(0, 20)
   }, [cases, search])
 
+  // Open Lead must always read ALL OPEN cases directly from the loaded
+  // Supabase case list. Do not use the dashboard's recent/search list here.
   const openLeads = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    return cases.filter(item => {
+      const status = String(item.status || '')
+        .trim()
+        .toUpperCase()
+        .replace(/-/g, '_')
+        .replace(/\s+/g, '_')
 
-    return cases
-      .filter(item => {
-        const status = String(item.status || '')
-          .trim()
-          .toUpperCase()
-          .replace(/-/g, '_')
-          .replace(/\s+/g, '_')
-
-        return status === 'OPEN'
-      })
-      .filter(item => {
-        if (!q) return true
-
-        return [
-          item.case_id,
-          item.customer_name,
-          item.registration_number,
-          item.mobile_phone,
-          item.make,
-          item.model,
-          item.variant,
-          item.loan_number,
-          item.bank_executive_name,
-          item.bank_executive_mobile
-        ]
-          .filter(Boolean)
-          .some(value =>
-            String(value).toLowerCase().includes(q)
-          )
-      })
-  }, [cases, search])
+      return status === 'OPEN'
+    })
+  }, [cases])
 
   const segments = useMemo(() => {
     return [
@@ -747,6 +899,124 @@ function App() {
     }
   }
 
+  function openAssignCase(item) {
+    setActionError('')
+    setAssignTpaId('')
+    setAssignReason('')
+    setAssignRemarks('')
+    setAssignCase(item)
+  }
+
+  function openRemarkCase(item) {
+    setActionError('')
+    setRemarkText('')
+    setRemarkCase(item)
+  }
+
+  function openRejectCase(item) {
+    setActionError('')
+    setRejectReason('')
+    setRejectRemarks('')
+    setRejectCase(item)
+  }
+
+  async function rejectOpenCase() {
+    if (!rejectCase) {
+      setActionError('No case selected.')
+      return
+    }
+
+    const reason = rejectReason.trim()
+    const remarks = rejectRemarks.trim()
+
+    if (!reason) {
+      setActionError('Reject reason is mandatory.')
+      return
+    }
+
+    setActionSaving(true)
+    setActionError('')
+
+    try {
+      const { data, error } = await supabase
+        .from('cases')
+        .update({ status: 'REJECTED' })
+        .eq('id', rejectCase.id)
+        .eq('status', 'OPEN')
+        .select()
+        .single()
+
+      if (error) throw new Error(error.message)
+
+      const { error: auditError } = await supabase
+        .from('audit_trail')
+        .insert({
+          case_id: rejectCase.case_id,
+          action: 'Rejected',
+          stage: 'OPEN',
+          old_status: 'OPEN',
+          new_status: 'REJECTED',
+          reason,
+          remarks: remarks || null
+        })
+
+      if (auditError) throw new Error(auditError.message)
+
+      setRejectCase(null)
+      setRejectReason('')
+      setRejectRemarks('')
+      await loadCases()
+    } catch (error) {
+      console.error('Reject lead error:', error)
+      setActionError(error?.message || 'Unable to reject lead.')
+    } finally {
+      setActionSaving(false)
+    }
+  }
+
+  async function saveRemark() {
+    const text = remarkText.trim()
+
+    if (!remarkCase) {
+      setActionError('No case selected.')
+      return
+    }
+
+    if (!text) {
+      setActionError('Please enter remarks.')
+      return
+    }
+
+    setActionSaving(true)
+    setActionError('')
+
+    try {
+      const { error } = await supabase
+        .from('audit_trail')
+        .insert({
+          case_id: remarkCase.case_id,
+          action: 'Remark Added',
+          stage: 'OPEN',
+          old_status: remarkCase.status || 'OPEN',
+          new_status: remarkCase.status || 'OPEN',
+          remarks: text
+        })
+
+      if (error) throw new Error(error.message)
+
+      setRemarkCase(null)
+      setRemarkText('')
+      await loadCases()
+    } catch (error) {
+      setActionError(
+        error?.message || 'Unable to save remarks.'
+      )
+    } finally {
+      setActionSaving(false)
+    }
+  }
+
+  
   async function saveLead(event) {
     event.preventDefault()
 
@@ -1296,6 +1566,83 @@ function App() {
             </section>
 
           </>
+        ) : active === 'TPA Master' ? (
+
+          <section className="panel">
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 16,
+                gap: 12
+              }}
+            >
+              <div>
+                <h2 style={{ marginBottom: 4 }}>TPA Master</h2>
+                <p style={{ margin: 0 }}>
+                  Manage TPA users available for case assignment.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  resetTpaForm()
+                  setTpaModal(true)
+                }}
+              >
+                ＋ Add TPA
+              </button>
+            </div>
+
+            <div style={{ overflowX: 'auto' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>TPA Name</th>
+                    <th>Mobile</th>
+                    <th>Email</th>
+                    <th>Location</th>
+                    <th>Zone</th>
+                    <th>State</th>
+                    <th>Client Mapping</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tpas.length === 0 ? (
+                    <tr>
+                      <td colSpan="8" style={{ textAlign: 'center', padding: 28 }}>
+                        No TPA records found. Click Add TPA to create the first active TPA.
+                      </td>
+                    </tr>
+                  ) : (
+                    tpas.map(tpa => (
+                      <tr key={tpa.id}>
+                        <td><strong>{tpa.name}</strong></td>
+                        <td>{tpa.mobile || '—'}</td>
+                        <td>{tpa.email || '—'}</td>
+                        <td>{tpa.location || '—'}</td>
+                        <td>{tpa.zone || '—'}</td>
+                        <td>{tpa.state || '—'}</td>
+                        <td>{tpa.client_mapping || 'All Clients'}</td>
+                        <td>
+                          <span className="status">
+                            {tpa.is_active ? 'ACTIVE' : 'INACTIVE'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+          </section>
+
         ) : active === 'Add Lead' ? (
 
           <section className="panel empty">
@@ -1322,7 +1669,7 @@ function App() {
 
           </section>
 
-        ) : String(active || '').trim() === 'Open Lead' ? (
+        ) : active === 'Open Lead' ? (
 
           <section className="panel">
 
@@ -1460,6 +1807,7 @@ function App() {
                               <button
                                 type="button"
                                 title="Edit Lead"
+                                aria-label="Edit Lead"
                                 onClick={() => openEditLead(item)}
                               >
                                 <Pencil size={16} />
@@ -1468,6 +1816,7 @@ function App() {
                               <button
                                 type="button"
                                 title="History"
+                                aria-label="History"
                                 onClick={() => {
                                   setSelectedCase(item)
                                   setHist(true)
@@ -1478,10 +1827,29 @@ function App() {
 
                               <button
                                 type="button"
-                                title="View Lead"
-                                onClick={() => setSelectedCase(item)}
+                                title="Assign"
+                                aria-label="Assign"
+                                onClick={() => openAssignCase(item)}
                               >
-                                <Eye size={16} />
+                                <UserPlus size={16} />
+                              </button>
+
+                              <button
+                                type="button"
+                                title="Add Remarks"
+                                aria-label="Add Remarks"
+                                onClick={() => openRemarkCase(item)}
+                              >
+                                <MessageSquare size={16} />
+                              </button>
+
+                              <button
+                                type="button"
+                                title="Reject Lead"
+                                aria-label="Reject Lead"
+                                onClick={() => openRejectCase(item)}
+                              >
+                                <X size={16} />
                               </button>
                             </div>
                           </td>
@@ -2011,6 +2379,309 @@ function App() {
 
             </form>
 
+          </Modal>
+        )}
+
+        {assignCase && (
+          <Modal
+            title={`Assign Case — CASE-${assignCase.case_id}`}
+            close={() => {
+              if (!actionSaving) {
+                setAssignCase(null)
+                setActionError('')
+              }
+            }}
+          >
+            <div className="panel" style={{ marginBottom: 12 }}>
+              <strong>Assign OPEN Case</strong>
+              <p style={{ marginBottom: 0 }}>
+                Select an active TPA. The case will move to ASSIGNED immediately after confirmation.
+              </p>
+            </div>
+
+            {actionError && (
+              <div
+                className="panel"
+                style={{
+                  marginBottom: 12,
+                  border: '1px solid #fecaca',
+                  background: '#fff1f2'
+                }}
+              >
+                <strong>Unable to assign case</strong>
+                <p>{actionError}</p>
+              </div>
+            )}
+
+            <div className="form-grid">
+              <Field label="Case ID" value={`CASE-${assignCase.case_id}`} disabled />
+              <Field label="Customer" value={assignCase.customer_name || ''} disabled />
+              <Field label="Registration Number" value={assignCase.registration_number || ''} disabled />
+              <Field label="Current Status" value={displayStatus(assignCase.status)} disabled />
+
+              <label className="field">
+                <span>Active TPA <b style={{ color: '#dc2626' }}>*</b></span>
+                <select
+                  value={assignTpaId}
+                  onChange={e => setAssignTpaId(e.target.value)}
+                  required
+                >
+                  <option value="">Select TPA</option>
+                  {tpas
+                    .filter(tpa => tpa.is_active)
+                    .map(tpa => (
+                      <option key={tpa.id} value={tpa.id}>
+                        {tpa.name} — {tpa.mobile}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span>Reason</span>
+                <input
+                  value={assignReason}
+                  onChange={e => setAssignReason(e.target.value)}
+                  placeholder="Assignment reason"
+                />
+              </label>
+
+              <label className="field" style={{ width: '100%' }}>
+                <span>Remarks</span>
+                <textarea
+                  value={assignRemarks}
+                  onChange={e => setAssignRemarks(e.target.value)}
+                  placeholder="Assignment remarks"
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    resize: 'vertical',
+                    padding: 10,
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 8,
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </label>
+            </div>
+
+            {tpas.filter(tpa => tpa.is_active).length === 0 && (
+              <div
+                className="panel"
+                style={{
+                  marginTop: 12,
+                  border: '1px solid #fed7aa',
+                  background: '#fff7ed'
+                }}
+              >
+                <strong>No active TPA available.</strong>
+                <p>
+                  Add an active TPA in TPA Master before assigning this case.
+                </p>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+              <button
+                type="button"
+                className="primary"
+                style={{ background: '#64748b' }}
+                onClick={() => setAssignCase(null)}
+                disabled={actionSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={assignCaseToTpa}
+                disabled={actionSaving}
+              >
+                <UserPlus size={16} /> Assign TPA
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {rejectCase && (
+          <Modal
+            title={`Reject Lead — CASE-${rejectCase.case_id}`}
+            close={() => {
+              if (!actionSaving) {
+                setRejectCase(null)
+                setRejectReason('')
+                setRejectRemarks('')
+                setActionError('')
+              }
+            }}
+          >
+            {actionError && (
+              <div
+                className="panel"
+                style={{
+                  marginBottom: 12,
+                  border: '1px solid #fecaca',
+                  background: '#fff1f2'
+                }}
+              >
+                <strong>Unable to reject lead</strong>
+                <p>{actionError}</p>
+              </div>
+            )}
+
+            <div
+              className="panel"
+              style={{
+                marginBottom: 12,
+                border: '1px solid #fecaca',
+                background: '#fff7f7'
+              }}
+            >
+              <strong>Rejecting this OPEN lead</strong>
+              <p style={{ marginBottom: 0 }}>
+                The case will move from OPEN to REJECTED and the rejection
+                reason will be stored in the audit trail.
+              </p>
+            </div>
+
+            <div className="form-grid">
+              <Field
+                label="Case ID"
+                value={`CASE-${rejectCase.case_id}`}
+                disabled
+              />
+
+              <Field
+                label="Customer"
+                value={rejectCase.customer_name || ''}
+                disabled
+              />
+
+              <label className="field" style={{ width: '100%' }}>
+                <span>
+                  Reject Reason <b style={{ color: '#dc2626' }}>*</b>
+                </span>
+                <textarea
+                  value={rejectReason}
+                  onChange={e => setRejectReason(e.target.value)}
+                  placeholder="Enter mandatory rejection reason"
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    resize: 'vertical',
+                    padding: 10,
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 8,
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </label>
+
+              <label className="field" style={{ width: '100%' }}>
+                <span>Additional Remarks</span>
+                <textarea
+                  value={rejectRemarks}
+                  onChange={e => setRejectRemarks(e.target.value)}
+                  placeholder="Enter additional remarks (optional)"
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    resize: 'vertical',
+                    padding: 10,
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 8,
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+              <button
+                type="button"
+                className="primary"
+                style={{ background: '#64748b' }}
+                onClick={() => setRejectCase(null)}
+                disabled={actionSaving}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                className="primary"
+                style={{ background: '#dc2626' }}
+                onClick={rejectOpenCase}
+                disabled={actionSaving}
+              >
+                {actionSaving ? 'Rejecting...' : 'Reject Lead'}
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {remarkCase && (
+          <Modal
+            title={`Add Remarks — CASE-${remarkCase.case_id}`}
+            close={() => {
+              if (!actionSaving) {
+                setRemarkCase(null)
+                setRemarkText('')
+                setActionError('')
+              }
+            }}
+          >
+            {actionError && (
+              <div
+                className="panel"
+                style={{
+                  marginBottom: 12,
+                  border: '1px solid #fecaca',
+                  background: '#fff1f2'
+                }}
+              >
+                <strong>Unable to save remarks</strong>
+                <p>{actionError}</p>
+              </div>
+            )}
+
+            <label className="field" style={{ width: '100%' }}>
+              <span>Remarks <b style={{ color: '#dc2626' }}>*</b></span>
+              <textarea
+                value={remarkText}
+                onChange={e => setRemarkText(e.target.value)}
+                placeholder="Enter remarks"
+                rows={6}
+                style={{
+                  width: '100%',
+                  resize: 'vertical',
+                  padding: 10,
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 8,
+                  fontFamily: 'inherit'
+                }}
+              />
+            </label>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+              <button
+                type="button"
+                className="primary"
+                style={{ background: '#64748b' }}
+                onClick={() => setRemarkCase(null)}
+                disabled={actionSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={saveRemark}
+                disabled={actionSaving}
+              >
+                {actionSaving ? 'Saving...' : 'Save Remarks'}
+              </button>
+            </div>
           </Modal>
         )}
 
