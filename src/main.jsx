@@ -2307,7 +2307,7 @@ function App() {
               </>
             )}
 
-          </sec
+          </section>
         ) : active === 'Reassign' ? (
 
           <section className="panel">
