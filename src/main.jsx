@@ -48,6 +48,13 @@ function App() {
   const [rejectReason, setRejectReason] = useState('')
   const [rejectRemarks, setRejectRemarks] = useState('')
   const [remarkText, setRemarkText] = useState('')
+  const [reassignCase, setReassignCase] = useState(null)
+  const [reassignTpaId, setReassignTpaId] = useState('')
+  const [reassignReason, setReassignReason] = useState('')
+  const [reassignRemarks, setReassignRemarks] = useState('')
+  const [historyEvents, setHistoryEvents] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState('')
   const [actionError, setActionError] = useState('')
   const [actionSaving, setActionSaving] = useState(false)
 
@@ -969,6 +976,178 @@ function App() {
     setRemarkCase(item)
   }
 
+  function openReassignCase(item) {
+    setActionError('')
+    setReassignTpaId('')
+    setReassignReason('')
+    setReassignRemarks('')
+    setReassignCase(item)
+  }
+
+  async function openHistory(item) {
+    setSelectedCase(item)
+    setHist(true)
+    setHistoryEvents([])
+    setHistoryError('')
+    setHistoryLoading(true)
+
+    try {
+      const [auditResult, assignmentResult] = await Promise.all([
+        supabase
+          .from('audit_trail')
+          .select('*')
+          .eq('case_id', item.case_id)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('assignment_history')
+          .select('*')
+          .eq('case_id', item.case_id)
+          .order('created_at', { ascending: true })
+      ])
+
+      if (auditResult.error) throw new Error(auditResult.error.message)
+      if (assignmentResult.error) throw new Error(assignmentResult.error.message)
+
+      const auditEvents = (auditResult.data || []).map(row => ({
+        id: `audit-${row.id}`,
+        source: 'Audit Trail',
+        action: row.action || 'Audit Event',
+        stage: row.stage || '—',
+        oldStatus: row.old_status || '—',
+        newStatus: row.new_status || '—',
+        reason: row.reason || '—',
+        remarks: row.remarks || '—',
+        userName: row.user_name || 'SS Sundar Singh',
+        role: row.role || 'Admin',
+        createdAt: row.created_at
+      }))
+
+      const assignmentEvents = (assignmentResult.data || []).map(row => ({
+        id: `assignment-${row.id}`,
+        source: 'Assignment History',
+        action: row.old_tpa ? 'Reassigned' : 'Assigned',
+        stage: 'ASSIGNMENT',
+        oldStatus: row.old_tpa ? 'ASSIGNED' : 'OPEN',
+        newStatus: row.old_tpa ? 'REASSIGNED' : 'ASSIGNED',
+        reason: row.reason || '—',
+        remarks: row.remarks || '—',
+        userName: row.assigned_by_name || row.assigned_by || 'SS Sundar Singh',
+        role: row.assigned_by_role || row.role || 'Admin',
+        createdAt: row.created_at,
+        oldTpa: row.old_tpa || '—',
+        newTpa: row.new_tpa || '—'
+      }))
+
+      const merged = [...auditEvents, ...assignmentEvents].sort(
+        (a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
+      )
+
+      setHistoryEvents(merged)
+    } catch (error) {
+      console.error('History load error:', error)
+      setHistoryError(error?.message || 'Unable to load case history.')
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  async function reassignCaseToTpa() {
+    if (!reassignCase) {
+      setActionError('No case selected.')
+      return
+    }
+
+    if (!reassignTpaId) {
+      setActionError('Please select a new active TPA.')
+      return
+    }
+
+    const reason = reassignReason.trim()
+    const remarks = reassignRemarks.trim()
+
+    if (!reason) {
+      setActionError('Reassign reason is mandatory.')
+      return
+    }
+
+    setActionSaving(true)
+    setActionError('')
+
+    try {
+      const tpa = tpas.find(item => String(item.id) === String(reassignTpaId))
+      if (!tpa) throw new Error('Selected TPA is not available.')
+
+      const oldTpa = reassignCase.assigned_tpa_name || null
+      if (String(reassignCase.assigned_tpa_id || '') === String(tpa.id)) {
+        throw new Error('Please select a different TPA.')
+      }
+
+      const { data, error } = await supabase
+        .from('cases')
+        .update({
+          status: 'REASSIGNED',
+          assigned_tpa_id: tpa.id,
+          assigned_tpa_name: tpa.name
+        })
+        .eq('id', reassignCase.id)
+        .in('status', ['ASSIGNED', 'REASSIGNED'])
+        .select('id, case_id, status, assigned_tpa_id, assigned_tpa_name')
+
+      if (error) throw new Error(error.message)
+      if (!data || data.length !== 1) {
+        throw new Error('Case was not reassigned. It may no longer be assigned or permissions/RLS may be blocking the update.')
+      }
+
+      const { error: historyError } = await supabase
+        .from('assignment_history')
+        .insert({
+          case_id: reassignCase.case_id,
+          old_tpa: oldTpa,
+          new_tpa: tpa.name,
+          assigned_by: null,
+          assigned_by_name: 'SS Sundar Singh',
+          assigned_by_role: 'Admin',
+          role: 'Admin',
+          reason,
+          remarks: remarks || null
+        })
+
+      if (historyError) {
+        console.error('Reassign history error:', historyError)
+      }
+
+      const { error: auditError } = await supabase
+        .from('audit_trail')
+        .insert({
+          case_id: reassignCase.case_id,
+          action: 'Reassigned',
+          stage: 'ASSIGN',
+          old_status: reassignCase.status || 'ASSIGNED',
+          new_status: 'REASSIGNED',
+          reason,
+          remarks: remarks || null,
+          user_id: null,
+          user_name: 'SS Sundar Singh',
+          role: 'Admin'
+        })
+
+      if (auditError) {
+        console.error('Reassign audit error:', auditError)
+      }
+
+      setReassignCase(null)
+      setReassignTpaId('')
+      setReassignReason('')
+      setReassignRemarks('')
+      await loadCases()
+    } catch (error) {
+      console.error('Reassign case error:', error)
+      setActionError(error?.message || 'Unable to reassign case.')
+    } finally {
+      setActionSaving(false)
+    }
+  }
+
   function openRejectCase(item) {
     setActionError('')
     setRejectReason('')
@@ -976,7 +1155,7 @@ function App() {
     setRejectCase(item)
   }
 
-  async function rejectOpenCase() {
+  async function rejectAssignedCase() {
     if (!rejectCase) {
       setActionError('No case selected.')
       return
@@ -990,6 +1169,12 @@ function App() {
       return
     }
 
+    const oldStatus = String(rejectCase.status || 'OPEN').trim().toUpperCase()
+    if (!['OPEN', 'ASSIGNED', 'REASSIGNED'].includes(oldStatus)) {
+      setActionError('This case cannot be rejected from the current stage.')
+      return
+    }
+
     setActionSaving(true)
     setActionError('')
 
@@ -998,33 +1183,40 @@ function App() {
         .from('cases')
         .update({ status: 'REJECTED' })
         .eq('id', rejectCase.id)
-        .eq('status', 'OPEN')
-        .select()
-        .single()
+        .eq('status', oldStatus)
+        .select('id, case_id, status')
 
       if (error) throw new Error(error.message)
+      if (!data || data.length !== 1) {
+        throw new Error('Case was not rejected. It may have changed stage or permissions/RLS may be blocking the update.')
+      }
 
       const { error: auditError } = await supabase
         .from('audit_trail')
         .insert({
           case_id: rejectCase.case_id,
           action: 'Rejected',
-          stage: 'OPEN',
-          old_status: 'OPEN',
+          stage: 'ASSIGN',
+          old_status: oldStatus,
           new_status: 'REJECTED',
           reason,
-          remarks: remarks || null
+          remarks: remarks || null,
+          user_id: null,
+          user_name: 'SS Sundar Singh',
+          role: 'Admin'
         })
 
-      if (auditError) throw new Error(auditError.message)
+      if (auditError) {
+        console.error('Reject audit error:', auditError)
+      }
 
       setRejectCase(null)
       setRejectReason('')
       setRejectRemarks('')
       await loadCases()
     } catch (error) {
-      console.error('Reject lead error:', error)
-      setActionError(error?.message || 'Unable to reject lead.')
+      console.error('Reject case error:', error)
+      setActionError(error?.message || 'Unable to reject case.')
     } finally {
       setActionSaving(false)
     }
@@ -2052,6 +2244,7 @@ function App() {
                           <th>Current TPA</th>
                           <th>Status</th>
                           <th>Date</th>
+                          <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2069,6 +2262,22 @@ function App() {
                               <td>{item.assigned_tpa_name || '—'}</td>
                               <td><span className="status">{displayStatus(item.status)}</span></td>
                               <td>{formatDate(item.created_at)}</td>
+                              <td>
+                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                  <button type="button" className="icon-button" title="Reassign" aria-label="Reassign" onClick={() => openReassignCase(item)}>
+                                    <RefreshCw size={15} />
+                                  </button>
+                                  <button type="button" className="icon-button" title="Remarks" aria-label="Remarks" onClick={() => openRemarkCase(item)}>
+                                    <MessageSquare size={15} />
+                                  </button>
+                                  <button type="button" className="icon-button" title="History" aria-label="History" onClick={() => openHistory(item)}>
+                                    <History size={15} />
+                                  </button>
+                                  <button type="button" className="icon-button" title="Reject" aria-label="Reject" onClick={() => openRejectCase(item)}>
+                                    <X size={15} />
+                                  </button>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                       </tbody>
@@ -2719,6 +2928,69 @@ function App() {
           </Modal>
         )}
 
+        {reassignCase && (
+          <Modal
+            title={`Reassign Case — CASE-${reassignCase.case_id}`}
+            close={() => {
+              if (!actionSaving) {
+                setReassignCase(null)
+                setReassignTpaId('')
+                setReassignReason('')
+                setReassignRemarks('')
+                setActionError('')
+              }
+            }}
+          >
+            {actionError && (
+              <div className="panel" style={{ marginBottom: 12, border: '1px solid #fecaca', background: '#fff1f2' }}>
+                <strong>Unable to reassign case</strong>
+                <p>{actionError}</p>
+              </div>
+            )}
+
+            <div className="panel" style={{ marginBottom: 12 }}>
+              <strong>Reassign Assigned Case</strong>
+              <p style={{ marginBottom: 0 }}>Select a different active TPA. The old TPA will lose the current assignment immediately.</p>
+            </div>
+
+            <div className="form-grid">
+              <Field label="Case ID" value={`CASE-${reassignCase.case_id}`} disabled />
+              <Field label="Customer" value={reassignCase.customer_name || ''} disabled />
+              <Field label="Registration Number" value={reassignCase.registration_number || ''} disabled />
+              <Field label="Current TPA" value={reassignCase.assigned_tpa_name || '—'} disabled />
+
+              <label className="field">
+                <span>New TPA <b style={{ color: '#dc2626' }}>*</b></span>
+                <select value={reassignTpaId} onChange={e => setReassignTpaId(e.target.value)} required>
+                  <option value="">Select New TPA</option>
+                  {tpas.map(tpa => (
+                    <option key={tpa.id} value={tpa.id}>
+                      {tpa.name} — {tpa.mobile || 'No mobile'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span>Reason <b style={{ color: '#dc2626' }}>*</b></span>
+                <input value={reassignReason} onChange={e => setReassignReason(e.target.value)} placeholder="Reassignment reason" />
+              </label>
+
+              <label className="field" style={{ width: '100%' }}>
+                <span>Remarks</span>
+                <textarea value={reassignRemarks} onChange={e => setReassignRemarks(e.target.value)} placeholder="Reassignment remarks" rows={4} style={{ width: '100%', resize: 'vertical', padding: 10, border: '1px solid #cbd5e1', borderRadius: 8, fontFamily: 'inherit' }} />
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+              <button type="button" className="primary" style={{ background: '#64748b' }} onClick={() => setReassignCase(null)} disabled={actionSaving}>Cancel</button>
+              <button type="button" className="primary" onClick={reassignCaseToTpa} disabled={actionSaving}>
+                {actionSaving ? 'Reassigning...' : 'Confirm Reassign'}
+              </button>
+            </div>
+          </Modal>
+        )}
+
         {rejectCase && (
           <Modal
             title={`Reject Lead — CASE-${rejectCase.case_id}`}
@@ -2740,7 +3012,7 @@ function App() {
                   background: '#fff1f2'
                 }}
               >
-                <strong>Unable to reject lead</strong>
+                <strong>Unable to reject case</strong>
                 <p>{actionError}</p>
               </div>
             )}
@@ -2753,9 +3025,9 @@ function App() {
                 background: '#fff7f7'
               }}
             >
-              <strong>Rejecting this OPEN lead</strong>
+              <strong>Rejecting this case</strong>
               <p style={{ marginBottom: 0 }}>
-                The case will move from OPEN to REJECTED and the rejection
+                The case will move from its current stage to REJECTED and the rejection
                 reason will be stored in the audit trail.
               </p>
             </div>
@@ -2827,10 +3099,10 @@ function App() {
                 type="button"
                 className="primary"
                 style={{ background: '#dc2626' }}
-                onClick={rejectOpenCase}
+                onClick={rejectAssignedCase}
                 disabled={actionSaving}
               >
-                {actionSaving ? 'Rejecting...' : 'Reject Lead'}
+                {actionSaving ? 'Rejecting...' : 'Reject Case'}
               </button>
             </div>
           </Modal>
@@ -2977,13 +3249,52 @@ function App() {
                     </div>
                   </div>
 
-                  <p>
-                    <b>Audit Trail</b>
-                    <small>
-                      Detailed immutable audit events will be
-                      connected in the Audit Trail stage.
-                    </small>
-                  </p>
+                  <div style={{ marginTop: 16 }}>
+                    <h3 style={{ marginBottom: 10 }}>History / Audit Trail</h3>
+                    {historyLoading ? (
+                      <p>Loading case history...</p>
+                    ) : historyError ? (
+                      <div className="panel" style={{ border: '1px solid #fecaca', background: '#fff1f2' }}>
+                        <strong>Unable to load history</strong>
+                        <p>{historyError}</p>
+                      </div>
+                    ) : historyEvents.length === 0 ? (
+                      <p>No history records found for this case.</p>
+                    ) : (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Date/Time</th>
+                              <th>Source</th>
+                              <th>Action</th>
+                              <th>Stage</th>
+                              <th>Old Status</th>
+                              <th>New Status</th>
+                              <th>User</th>
+                              <th>Reason</th>
+                              <th>Remarks</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {historyEvents.map(event => (
+                              <tr key={event.id}>
+                                <td>{formatDate(event.createdAt)}</td>
+                                <td>{event.source}</td>
+                                <td><strong>{event.action}</strong></td>
+                                <td>{event.stage}</td>
+                                <td>{event.oldStatus}</td>
+                                <td>{event.newStatus}</td>
+                                <td>{event.userName} ({event.role})</td>
+                                <td>{event.reason}</td>
+                                <td>{event.remarks}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                 </>
               ) : (
                 <p>No case selected.</p>
