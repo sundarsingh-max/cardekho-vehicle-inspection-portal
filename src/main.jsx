@@ -3973,13 +3973,94 @@ function TpaQcReport({ caseItem, cases = [], form, updateField, setForm, saving,
         )}
         {form.mediaError && <div style={{ marginTop: 7, padding: '6px 8px', background: '#fff5f5', border: '1px solid #f0b7b7', color: '#a00', fontSize: 9 }}>{form.mediaError}</div>}
 
-        {section('', 'Exterior Video',
-          <div style={{ border: '1px dashed #c8c8c8', padding: 10, fontSize: 10 }}>
-            <b>Exterior Video (Max 59s)</b>
-            <div style={{ marginTop: 5, color: '#666' }}>Only exterior inspection video is allowed. Maximum duration: 59 seconds, MP4, maximum 30MB.</div>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 8, cursor: 'pointer' }}><Upload size={12} /> Upload Exterior Video<input type="file" accept="image/*,video/mp4" style={{ display: 'none' }} /></label>
-          </div>
-        )}
+        {(() => {
+          const videoItem = form.exteriorVideo
+
+          const removeExteriorVideo = () => {
+            if (videoItem?.previewUrl) URL.revokeObjectURL(videoItem.previewUrl)
+            setForm(prev => ({ ...prev, exteriorVideo: null, mediaError: '' }))
+          }
+
+          const handleExteriorVideoUpload = event => {
+            const file = event.target.files?.[0]
+            event.target.value = ''
+            if (!file) return
+
+            if (file.type !== 'video/mp4') {
+              setForm(prev => ({ ...prev, mediaError: 'Exterior Video: Only MP4 video is allowed.' }))
+              return
+            }
+
+            if (file.size > 30 * 1024 * 1024) {
+              setForm(prev => ({ ...prev, mediaError: 'Exterior Video: Video must be 30MB or smaller.' }))
+              return
+            }
+
+            const previewUrl = URL.createObjectURL(file)
+            const testVideo = document.createElement('video')
+            testVideo.preload = 'metadata'
+            testVideo.onloadedmetadata = () => {
+              URL.revokeObjectURL(testVideo.src)
+              const duration = Number(testVideo.duration || 0)
+
+              if (!Number.isFinite(duration) || duration > 59) {
+                URL.revokeObjectURL(previewUrl)
+                setForm(prev => ({ ...prev, mediaError: 'Exterior Video: Maximum duration is 59 seconds.' }))
+                return
+              }
+
+              setForm(prev => ({
+                ...prev,
+                mediaError: '',
+                exteriorVideo: {
+                  name: file.name,
+                  type: file.type,
+                  size: file.size,
+                  duration: Math.round(duration * 10) / 10,
+                  previewUrl
+                }
+              }))
+            }
+            testVideo.onerror = () => {
+              URL.revokeObjectURL(previewUrl)
+              setForm(prev => ({ ...prev, mediaError: 'Exterior Video: Unable to read this video. Please select a valid MP4 file.' }))
+            }
+            testVideo.src = previewUrl
+          }
+
+          return section('', 'Exterior Video',
+            <div style={{ border: '1px dashed #c8c8c8', padding: 10, fontSize: 10 }}>
+              <b>Exterior Video (Max 59s)</b>
+              <div style={{ marginTop: 5, color: '#666' }}>Only exterior inspection video is allowed. Maximum duration: 59 seconds, MP4, maximum 30MB.</div>
+
+              {videoItem?.previewUrl && (
+                <div style={{ marginTop: 9, border: '1px solid #ddd', background: '#f7f7f7', padding: 7 }}>
+                  <video
+                    src={videoItem.previewUrl}
+                    controls
+                    preload="metadata"
+                    style={{ width: '100%', maxHeight: 280, display: 'block', background: '#111' }}
+                  />
+                  <div style={{ marginTop: 5, fontSize: 9, color: '#555' }}>
+                    {videoItem.name} · {videoItem.duration}s · {(videoItem.size / (1024 * 1024)).toFixed(1)} MB
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer', border: '1px solid #aaa', padding: '5px 8px', background: '#fff' }}>
+                  <Upload size={12} /> {videoItem ? 'Replace Video' : 'Upload Exterior Video'}
+                  <input type="file" accept="video/mp4,.mp4" onChange={handleExteriorVideoUpload} style={{ display: 'none' }} />
+                </label>
+                {videoItem && (
+                  <button type="button" onClick={removeExteriorVideo} style={{ border: 'none', background: 'transparent', color: '#c00', cursor: 'pointer', fontSize: 9 }}>
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })()}
 
         {section('E', 'Vahan Details',
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', border: '1px solid #d0d0d0' }}>
