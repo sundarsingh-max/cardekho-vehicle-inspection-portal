@@ -197,47 +197,42 @@ function App() {
       .slice(0, 20)
   }, [cases, search])
 
-  const segments = [
-    'CAR',
-    'CV',
-    'FE',
-    '3WLR',
-    '2WLR',
-    'CE'
-  ]
+  const segments = useMemo(() => {
+    return [
+      'CAR',
+      'CV',
+      'FE',
+      '3WLR',
+      '2WLR',
+      'CE'
+    ]
+  }, [])
 
-  const mmvHasSegment = useMemo(() => {
-    return mmv.some(row =>
-      String(
+  // MMV master now contains a real `segment` column.
+  // Always filter by Segment first; never fall back to all makes.
+  const mmvRowsForSelection = useMemo(() => {
+    if (!form.segment) return []
+
+    const selectedSegment = String(form.segment)
+      .trim()
+      .toUpperCase()
+
+    return mmv.filter(row => {
+      const rowSegment = String(
         firstValue(row, [
           'segment',
-          'Segment',
           'SEGMENT',
+          'Segment',
           'vehicle_segment',
           'VEHICLE_SEGMENT'
         ]) || ''
-      ).trim() !== ''
-    )
-  }, [mmv])
-
-  const mmvRowsForSelection = useMemo(() => {
-    return mmv.filter(row => {
-      const rowSegment = firstValue(row, [
-        'segment',
-        'Segment',
-        'SEGMENT',
-        'vehicle_segment',
-        'VEHICLE_SEGMENT'
-      ])
-
-      if (!form.segment || !mmvHasSegment) return true
-
-      return (
-        String(rowSegment || '').trim().toUpperCase() ===
-        String(form.segment).trim().toUpperCase()
       )
+        .trim()
+        .toUpperCase()
+
+      return rowSegment === selectedSegment
     })
-  }, [mmv, mmvHasSegment, form.segment])
+  }, [mmv, form.segment])
 
   const makes = useMemo(() => {
     return uniqueValues(
@@ -248,75 +243,84 @@ function App() {
           'Make'
         ])
       )
-    )
+    ).sort((a, b) => a.localeCompare(b))
   }, [mmvRowsForSelection])
+
+  const mmvRowsForSelectedMake = useMemo(() => {
+    if (!form.segment || !form.make) return []
+
+    const selectedMake = String(form.make)
+      .trim()
+      .toUpperCase()
+
+    return mmvRowsForSelection.filter(row => {
+      const rowMake = String(
+        firstValue(row, [
+          'make',
+          'MAKE',
+          'Make'
+        ]) || ''
+      )
+        .trim()
+        .toUpperCase()
+
+      return rowMake === selectedMake
+    })
+  }, [mmvRowsForSelection, form.make, form.segment])
 
   const models = useMemo(() => {
     return uniqueValues(
-      mmvRowsForSelection
-        .filter(row => {
-          const rowMake = firstValue(row, [
-            'make',
-            'MAKE',
-            'Make'
-          ])
+      mmvRowsForSelectedMake.map(row =>
+        firstValue(row, [
+          'model',
+          'MODEL',
+          'Model'
+        ])
+      )
+    ).sort((a, b) => a.localeCompare(b))
+  }, [mmvRowsForSelectedMake])
 
-          return (
-            !form.make ||
-            String(rowMake || '').trim().toUpperCase() ===
-              String(form.make).trim().toUpperCase()
-          )
-        })
-        .map(row =>
-          firstValue(row, [
-            'model',
-            'MODEL',
-            'Model'
-          ])
-        )
-    )
-  }, [mmvRowsForSelection, form.make])
+  const mmvRowsForSelectedModel = useMemo(() => {
+    if (!form.segment || !form.make || !form.model) return []
+
+    const selectedModel = String(form.model)
+      .trim()
+      .toUpperCase()
+
+    return mmvRowsForSelectedMake.filter(row => {
+      const rowModel = String(
+        firstValue(row, [
+          'model',
+          'MODEL',
+          'Model'
+        ]) || ''
+      )
+        .trim()
+        .toUpperCase()
+
+      return rowModel === selectedModel
+    })
+  }, [mmvRowsForSelectedMake, form.model, form.make, form.segment])
 
   const variants = useMemo(() => {
     return uniqueValues(
-      mmvRowsForSelection
-        .filter(row => {
-          const rowMake = firstValue(row, [
-            'make',
-            'MAKE',
-            'Make'
-          ])
+      mmvRowsForSelectedModel.map(row =>
+        firstValue(row, [
+          'variant',
+          'VARIANT',
+          'Variant'
+        ])
+      )
+    ).sort((a, b) => a.localeCompare(b))
+  }, [mmvRowsForSelectedModel])
 
-          const rowModel = firstValue(row, [
-            'model',
-            'MODEL',
-            'Model'
-          ])
-
-          return (
-            (!form.make ||
-              String(rowMake || '').trim().toUpperCase() ===
-                String(form.make).trim().toUpperCase()) &&
-            (!form.model ||
-              String(rowModel || '').trim().toUpperCase() ===
-                String(form.model).trim().toUpperCase())
-          )
-        })
-        .map(row =>
-          firstValue(row, [
-            'variant',
-            'VARIANT',
-            'Variant'
-          ])
-        )
-    )
-  }, [mmvRowsForSelection, form.make, form.model])
-
+  // Manufacturing Year is independent of MMV rows.
+  // It starts at 2010 and automatically includes the current year.
   const years = useMemo(() => {
     const currentYear = new Date().getFullYear()
     const result = []
 
-    for (let year = currentYear; year >= 2000; year--) {
+    for (let year = currentYear; year >= 2010; year--) {
       result.push(String(year))
     }
 
