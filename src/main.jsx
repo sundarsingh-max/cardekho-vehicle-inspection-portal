@@ -3584,28 +3584,249 @@ function App() {
 }
 
 function TpaQcReport({ caseItem, form, updateField, setForm, saving, message, onSave, onSubmit, onRemarks, onReject, onHistory }) {
-  const [page, setPage] = useState(1)
-  if (!caseItem) return <section className="panel empty"><Database /><h2>TPA QC</h2><p>Select an Assigned/Reassigned case from Reassign to start the inspection report.</p></section>
-  const pageStyle={background:'#fff',border:'1px solid #d7dce2',minHeight:980,padding:'28px 34px',marginBottom:18,boxShadow:'0 4px 14px rgba(15,23,42,.06)',fontFamily:'Arial,Helvetica,sans-serif',color:'#222'}
-  const header=<div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',borderBottom:'1px solid #ddd',paddingBottom:10,marginBottom:14}}><div style={{display:'flex',alignItems:'center',gap:10}}><div style={{width:34,height:34,borderRadius:'50%',background:'#ef4444',color:'#fff',display:'grid',placeItems:'center',fontWeight:800}}>CD</div><div><div style={{fontSize:20,fontWeight:800}}>CarDekho</div><div style={{fontSize:10,letterSpacing:1}}>INSPECTION</div></div></div><div style={{textAlign:'right'}}><b style={{fontSize:17}}>Vehicle Inspection Report</b><div style={{fontSize:11}}>Certificate No.: {caseItem.case_id}</div></div></div>
-  const input=(label,key,disabled=false)=><label style={{display:'block',fontSize:10,marginBottom:8}}><span style={{display:'block',fontWeight:700,marginBottom:3}}>{label}</span><input value={form[key]||''} disabled={disabled} onChange={e=>updateField(key,e.target.value)} style={{width:'100%',boxSizing:'border-box',padding:'6px 7px',border:'1px solid #d7dce2',borderRadius:2,fontSize:11,background:disabled?'#f7f7f7':'#fff'}} /></label>
-  const section=(letter,title,children)=><div style={{border:'1px solid #cfcfcf',marginTop:10}}><div style={{background:'#f7f7f7',padding:'7px 10px',fontWeight:800,fontSize:13}}>{letter&&<span style={{display:'inline-block',background:'#444',color:'#fff',padding:'2px 7px',marginRight:7}}>{letter}</span>}{title}</div><div style={{padding:10}}>{children}</div></div>
-  const score=(label,key)=><label style={{fontSize:10}}><span style={{display:'block',fontWeight:700}}>{label}</span><input value={form[key]||''} onChange={e=>updateField(key,e.target.value)} placeholder=" /10" style={{width:'80px',padding:'5px',border:'1px solid #d7dce2'}} /></label>
-  const media=['Profile Picture','Right View','Right Quarter Panel','Rear View','Left Quarter Panel','Left View','Left Side Profile Pic','Front View','Engine Compartment','Boot / Dicky','Front Windscreen','Windscreen - Interior ( from rear seat)','Odometer Reading','ABC Pedals ( from driver seat)','Selfie with Vehicle','Other Images','VinPlate Photo','Chassis Imprint','Chassis Number Pencil Tracing']
-  const ranges=page===3?[0,8]:page===4?[8,16]:[16,19]
-  return <div>
-    <div className="panel" style={{marginBottom:12,position:'sticky',top:0,zIndex:5}}><div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}><div><h2 style={{margin:0}}>TPA QC — Vehicle Inspection Report</h2><small>CASE-{caseItem.case_id} · {caseItem.registration_number||'Registration not available'} · Same PDF structure</small></div><div style={{display:'flex',gap:7,flexWrap:'wrap'}}><button className="primary" type="button" onClick={onSave} disabled={saving}><Save size={15}/> {saving?'Saving...':'Save Draft'}</button><button type="button" onClick={onRemarks}>Remarks</button><button type="button" onClick={onReject}>Reject</button><button type="button" onClick={onHistory}>History</button><button className="primary" type="button" onClick={onSubmit} disabled={saving}>Submit to QC</button></div></div>{message&&<div style={{marginTop:8,padding:8,background:'#f0fdf4',border:'1px solid #bbf7d0'}}>{message}</div>}</div>
-    <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>{[1,2,3,4,5,6,7,8].map(n=><button key={n} type="button" onClick={()=>setPage(n)} style={{background:page===n?'#ef4444':'#fff',color:page===n?'#fff':'#111',border:'1px solid #cbd5e1',padding:'5px 10px'}}>Page {n}</button>)}</div>
-    <div style={pageStyle}>{header}
-      {page===1&&<><div style={{fontSize:17,fontWeight:800,marginBottom:10}}>{[caseItem.make,caseItem.model,caseItem.variant].filter(Boolean).join(' ')||'Vehicle Inspection'}</div>{section('A','Vehicle Details',<div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>{input('Reg. No','registration_number')}{input('RTO','rto')}{input('Manufacturing Date','manufacturing_date')}{input('Registration Date','registration_date')}{input('No of Owners','owner_count')}{input('Odometer Reading','odometer')}{input('Fuel Type','fuel')}{input('Transmission','transmission')}{input('Color','color')}{input('Body Type','body_type')}{input('Engine Number','engine_number')}{input('Chassis Number','chassis_number')}{input('Loan No/Ref No','loan_number')}{input('RC Available','rc_available')}{input('Insurance Type','insurance_type')}{input('Third Party Insurance Validity','third_party_validity')}{input('Hypothecation','hypothecation')}{input('Financier','financier')}{input('CNG/LPG Fitment','cng_fitment')}{input('CNG/LPG Category','cng_category')}{input('Road Tax Validity','road_tax_validity')}{input('Road Tax Validity Date','road_tax_date')}{input('Customer Name','customer_name')}{input('Client Name','client_name')}{input('CNG Validity Date','cng_validity')}{input('Key Available','key_available')}{input('Inspection Type','inspection_type')}{input('Inspection Site','inspection_site')}</div>)}{section('B','Summary',<div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:8}}>{score('Overall Score','overall_score')}{score('Body and Frame','body_score')}{score('Exterior and Interior','exterior_score')}{score('Light','light_score')}{score('Tyre Details','tyre_score')}{score('Other Details','other_score')}</div>)}{section('C','Remarks / Condition',<div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:12}}><label style={{fontSize:10,fontWeight:700}}>Condition<select value={form.condition||''} onChange={e=>updateField('condition',e.target.value)} style={{display:'block',width:'100%',padding:7,marginTop:4}}><option value="">Select</option><option>Excellent</option><option>Good</option><option>Average</option><option>Poor</option></select></label>{input('Remarks','remarks')}</div>)}</>}
-      {page===2&&section('B','Detailed Inspection',<div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>{['Body and Frame','Exterior and Interior','Light','Tyre Details','Other Details'].map(group=><div key={group} style={{border:'1px solid #ddd',padding:10}}><b>{group}</b>{['Good','Scratched','Dented','Available','Not Available','Not Applicable'].map(v=><label key={v} style={{display:'block',fontSize:11,marginTop:7}}><input type="radio" name={group.replaceAll(' ','-')} /> {v}</label>)}</div>)}</div>)}
-      {(page===3||page===4||page===5)&&section('D','Inspection Photos',<div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:12}}>{media.slice(...ranges).map(name=><div key={name} style={{border:'1px dashed #bbb',minHeight:145,padding:10,textAlign:'center'}}><div style={{fontWeight:700,fontSize:11}}>{name}</div><div style={{height:95,display:'grid',placeItems:'center',background:'#f8fafc',margin:'8px 0'}}>No Image</div><label style={{fontSize:10,cursor:'pointer'}}><Upload size={13}/> Upload<input type="file" accept="image/*" style={{display:'none'}} /></label></div>)}</div>)}
-      {page===6&&section('', 'Disclaimer / Notes', <div style={{fontSize:11,lineHeight:1.6}}><p>This inspection summary report is compiled based on information provided to us including title documents, MMV, year, condition, odometer reading and external examination of the vehicle/components.</p><p>The report will not tell you about hidden defects or problems which cannot be identified by a visual inspection.</p><p>To check the genuinity of condition report please scan the QR code on 1st page of report.</p></div>)}
-      {page===7&&section('E','Vahan Details',<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',border:'1px solid #ddd'}}>{['Registration Number','Manufacturing Date','Registered RTO','Registration Date','Owner Name','RC Blacklist Status','Owner Count','Fitness Upto','Owner Permanent Address','Name of Financier','Owner Present Address','Insurer','Vehicle Name','Policy Number','Make','Insurance Valid Upto','Model','PUCC Number','Vehicle Category','PUCC Valid Upto','Vehicle Class','NP Issued By','Wheel Base','NP Number','Chassis Number','NP Valid Upto','Engine Number','Permit Issue Date','Car Color','Permit Number','Fuel Type','Permit Type','Fuel Norms','Permit Valid From','Engine Capacity','Permit Valid Upto','Gross Vehicle Weight','RC Tax Upto','Seating Capacity','Body Type','Sleeper Capacity'].map(k=><div key={k} style={{padding:8,borderBottom:'1px solid #eee',fontSize:10}}><b>{k}</b><div style={{marginTop:5,color:'#999'}}>— API value will be populated later —</div></div>)}</div>)}
-      {page===8&&section('F','Challan Details',<div style={{border:'1px solid #ddd'}}>{[1,2,3,4,5,6,7,8,9].map(n=><div key={n} style={{display:'grid',gridTemplateColumns:'50px 1fr 1fr 90px 90px',fontSize:10,padding:8,borderBottom:'1px solid #eee'}}><span>{n}</span><span>—</span><span>—</span><span>—</span><span>—</span></div>)}<p style={{fontSize:10,color:'#666'}}>Challan data intentionally blank until API integration.</p></div>)}
-      <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'#666',marginTop:18}}><span>Date of Inspection</span><span>Page: {page} of 8</span><span>CarDekho INSPECTION</span></div>
+  if (!caseItem) {
+    return (
+      <section className="panel empty">
+        <Database />
+        <h2>TPA QC</h2>
+        <p>Select an Assigned/Reassigned case from Reassign to start the inspection report.</p>
+      </section>
+    )
+  }
+
+  const reportField = (label, key, disabled = false) => (
+    <label style={{ display: 'grid', gridTemplateColumns: '145px 1fr', alignItems: 'center', gap: 8, fontSize: 10, minHeight: 27 }}>
+      <span style={{ fontWeight: 700, color: '#222' }}>{label}</span>
+      <input
+        value={form[key] || ''}
+        disabled={disabled}
+        onChange={e => updateField(key, e.target.value)}
+        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '3px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: disabled ? '#f7f7f7' : '#fff' }}
+      />
+    </label>
+  )
+
+  const scoreField = (label, key) => (
+    <label style={{ display: 'grid', gridTemplateColumns: '1fr 58px', alignItems: 'center', gap: 5, fontSize: 10 }}>
+      <span style={{ fontWeight: 700 }}>{label}</span>
+      <input value={form[key] || ''} onChange={e => updateField(key, e.target.value)} placeholder="/10" style={{ width: '100%', height: 24, boxSizing: 'border-box', padding: '2px 5px', border: '1px solid #aaa', borderRadius: 0, fontSize: 10 }} />
+    </label>
+  )
+
+  const section = (letter, title, children) => (
+    <div style={{ border: '1px solid #c7c7c7', marginTop: 10, background: '#fff' }}>
+      <div style={{ background: '#f3f3f3', borderBottom: '1px solid #c7c7c7', minHeight: 30, display: 'flex', alignItems: 'center', padding: '0 9px', fontWeight: 800, fontSize: 12 }}>
+        {letter && <span style={{ display: 'inline-grid', placeItems: 'center', width: 22, height: 22, background: '#444', color: '#fff', marginRight: 7, fontSize: 12 }}>{letter}</span>}
+        {title}
+      </div>
+      <div style={{ padding: 9 }}>{children}</div>
     </div>
-  </div>
+  )
+
+  const parameterGroups = [
+    {
+      title: 'Body & Frame',
+      rows: ['A Pillar L', 'A Pillar R', 'B Pillar L', 'B Pillar R', 'C Pillar L', 'C Pillar R', 'Front Panel', 'Quarter Panel L', 'Quarter Panel R', 'Apron L', 'Apron R', 'Running Board L', 'Running Board R', 'Roof', 'Dickey Floor']
+    },
+    {
+      title: 'Exterior & Interior',
+      rows: ['Bonnet', 'Fender L', 'Fender R', 'Front Door L', 'Front Door R', 'Rear Door L', 'Rear Door R', 'Front Bumper', 'Rear Bumper', 'Glasses', 'Chassis Frame', 'Windscreen', 'ORVM', 'Music System']
+    },
+    { title: 'Light', rows: ['Head Light L', 'Head Light R', 'Tail Light L', 'Tail Light R'] },
+    { title: 'Tyre Details', rows: ['Front Right', 'Front Left', 'Rear Right', 'Rear Left', 'Spare'] },
+    { title: 'Other Details', rows: ['AC', 'ABS', 'Alloy', 'Battery', 'Engine'] }
+  ]
+
+  const media = [
+    'Profile Picture', 'Right View', 'Right Quarter Panel', 'Rear View', 'Left Quarter Panel', 'Left View', 'Left Side Profile Pic', 'Front View',
+    'Engine Compartment 1', 'Engine Compartment 2', 'Engine Compartment 3', 'Boot / Dicky', 'Front Windscreen', 'Windscreen - Interior (from rear seat)',
+    'Dashboard', 'Odometer Reading 1', 'Odometer Reading 2', 'ABC Pedals (from driver seat)', 'Selfie with Vehicle', 'Other Images 1', 'Other Images 2', 'Other Images 3',
+    'VIN Plate Photo', 'Chassis Imprint 1', 'Chassis Imprint 2', 'Pencil Tracing 1', 'Pencil Tracing 2'
+  ]
+
+  const vahanFields = ['Registration Number','Manufacturing Date','Registered RTO','Registration Date','Owner Name','RC Blacklist Status','Owner Count','Fitness Upto','Owner Permanent Address','Name of Financier','Owner Present Address','Insurer','Vehicle Name','Policy Number','Make','Insurance Valid Upto','Model','PUCC Number','Vehicle Category','PUCC Valid Upto','Vehicle Class','NP Issued By','Wheel Base','NP Number','Chassis Number','NP Valid Upto','Engine Number','Permit Issue Date','Car Color','Permit Number','Fuel Type','Permit Type','Fuel Norms','Permit Valid From','Engine Capacity','Permit Valid Upto','Gross Vehicle Weight','RC Tax Upto','Seating Capacity','Body Type','Sleeper Capacity']
+
+  const reportShell = {
+    background: '#fff',
+    border: '1px solid #c8cdd2',
+    boxShadow: '0 2px 7px rgba(0,0,0,.05)',
+    padding: '28px 34px 24px',
+    fontFamily: 'Arial, Helvetica, sans-serif',
+    color: '#161616',
+    maxWidth: 1100,
+    margin: '0 auto'
+  }
+
+  const reportHeader = (
+    <div style={{ borderBottom: '1px solid #cfcfcf', paddingBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ width: 34, height: 34, borderRadius: '50%', background: '#ef3e42', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 14 }}>CD</div>
+        <div>
+          <div style={{ fontSize: 20, lineHeight: 1, fontWeight: 800 }}>CarDekho</div>
+          <div style={{ fontSize: 9, letterSpacing: 1.2, marginTop: 4 }}>INSPECTION</div>
+        </div>
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        <div style={{ fontSize: 16, fontWeight: 800 }}>Vehicle Inspection Report</div>
+        <div style={{ fontSize: 10, marginTop: 2 }}>Certificate No.: {String(caseItem.case_id || '').replace(/^CASE-/, '')}</div>
+      </div>
+    </div>
+  )
+
+  return (
+    <div>
+      <div className="panel" style={{ marginBottom: 12, position: 'sticky', top: 0, zIndex: 5 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div>
+            <h2 style={{ margin: 0 }}>TPA QC — Vehicle Inspection Report</h2>
+            <small>{caseItem.case_id} · {caseItem.registration_number || 'Registration not available'} · Single-page merged report</small>
+          </div>
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+            <button className="primary" type="button" onClick={onSave} disabled={saving}><Save size={15} /> {saving ? 'Saving...' : 'Save Draft'}</button>
+            <button type="button" onClick={onRemarks}>Remarks</button>
+            <button type="button" onClick={onReject}>Reject</button>
+            <button type="button" onClick={onHistory}>History</button>
+            <button className="primary" type="button" onClick={onSubmit} disabled={saving}>Submit to QC</button>
+          </div>
+        </div>
+        {message && <div style={{ marginTop: 8, padding: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: 12 }}>{message}</div>}
+      </div>
+
+      <div style={reportShell}>
+        {reportHeader}
+
+        <div style={{ marginTop: 12, fontSize: 17, fontWeight: 800 }}>
+          {[caseItem.make, caseItem.model, caseItem.variant].filter(Boolean).join(' ') || 'Vehicle Inspection'}
+        </div>
+
+        {section('A', 'Vehicle Details',
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 24, rowGap: 1 }}>
+            {reportField('Registration No.', 'registration_number')}
+            {reportField('RTO', 'rto')}
+            {reportField('Manufacturing Date', 'manufacturing_date')}
+            {reportField('Registration Date', 'registration_date')}
+            {reportField('No. of Owners', 'owner_count')}
+            {reportField('Odometer Reading', 'odometer')}
+            {reportField('Fuel Type', 'fuel')}
+            {reportField('Transmission', 'transmission')}
+            {reportField('Color', 'color')}
+            {reportField('Body Type', 'body_type')}
+            {reportField('Engine Number', 'engine_number')}
+            {reportField('Chassis Number', 'chassis_number')}
+            {reportField('Loan No./Ref. No.', 'loan_number')}
+            {reportField('RC Available', 'rc_available')}
+            {reportField('Insurance Type', 'insurance_type')}
+            {reportField('Insurance Validity', 'insurance_validity')}
+            {reportField('Insurance Expiry', 'insurance_expiry')}
+            {reportField('Third Party Validity', 'third_party_validity')}
+            {reportField('Hypothecation', 'hypothecation')}
+            {reportField('Financier', 'financier')}
+            {reportField('CNG/LPG Fitment', 'cng_fitment')}
+            {reportField('CNG/LPG Category', 'cng_category')}
+            {reportField('Road Tax Validity', 'road_tax_validity')}
+            {reportField('Road Tax Date', 'road_tax_date')}
+            {reportField('Customer Name', 'customer_name')}
+            {reportField('Client Name', 'client_name')}
+            {reportField('CNG Validity Date', 'cng_validity')}
+            {reportField('Key Available', 'key_available')}
+            {reportField('Inspection Type', 'inspection_type')}
+            {reportField('Inspection Site', 'inspection_site')}
+          </div>
+        )}
+
+        {section('B', 'Summary / Score',
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            {scoreField('Overall Score', 'overall_score')}
+            {scoreField('Body and Frame', 'body_score')}
+            {scoreField('Exterior and Interior', 'exterior_score')}
+            {scoreField('Light', 'light_score')}
+            {scoreField('Tyre Details', 'tyre_score')}
+            {scoreField('Other Details', 'other_score')}
+            <label style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', alignItems: 'center', gap: 5, fontSize: 10 }}><span style={{ fontWeight: 700 }}>Condition</span><select value={form.condition || ''} onChange={e => updateField('condition', e.target.value)} style={{ height: 24, border: '1px solid #aaa', borderRadius: 0, fontSize: 10 }}><option value="">Select</option><option>Excellent</option><option>Good</option><option>Average</option><option>Poor</option></select></label>
+          </div>
+        )}
+
+        {section('C', 'Detailed Inspection',
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            {parameterGroups.map(group => (
+              <div key={group.title} style={{ border: '1px solid #cfcfcf' }}>
+                <div style={{ background: '#f3f3f3', borderBottom: '1px solid #cfcfcf', padding: '6px 8px', fontWeight: 800, fontSize: 11 }}>{group.title}</div>
+                <div style={{ padding: 7 }}>
+                  {group.rows.map(row => (
+                    <div key={row} style={{ display: 'grid', gridTemplateColumns: '1fr 125px', gap: 7, alignItems: 'center', borderBottom: '1px solid #ededed', minHeight: 25, fontSize: 9.5 }}>
+                      <span>{row}</span>
+                      <select value={form.detailed?.[row] || ''} onChange={e => setForm(prev => ({ ...prev, detailed: { ...(prev.detailed || {}), [row]: e.target.value } }))} style={{ height: 22, border: '1px solid #aaa', borderRadius: 0, fontSize: 9.5 }}>
+                        <option value="">Select</option><option>Good</option><option>Scratched</option><option>Dented</option><option>Ok</option><option>Available</option><option>Not Available</option><option>Not Applicable</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {section('D', 'Inspection Photos / Media',
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+            {media.map(name => (
+              <div key={name} style={{ border: '1px solid #cfcfcf', minHeight: 128, padding: 6, background: '#fff' }}>
+                <div style={{ fontWeight: 700, fontSize: 9, minHeight: 25 }}>{name}</div>
+                <div style={{ height: 75, background: '#f7f7f7', border: '1px solid #e2e2e2', display: 'grid', placeItems: 'center', fontSize: 9, color: '#888' }}>No Image</div>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 5, fontSize: 9, cursor: 'pointer' }}><Upload size={11} /> Upload<input type="file" accept="image/*" style={{ display: 'none' }} /></label>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {section('', 'Exterior Video',
+          <div style={{ border: '1px dashed #c8c8c8', padding: 10, fontSize: 10 }}>
+            <b>Exterior Video (Max 59s)</b>
+            <div style={{ marginTop: 5, color: '#666' }}>Only exterior inspection video is allowed. Maximum duration: 59 seconds, MP4, maximum 30MB.</div>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 8, cursor: 'pointer' }}><Upload size={12} /> Upload Exterior Video<input type="file" accept="image/*,video/mp4" style={{ display: 'none' }} /></label>
+          </div>
+        )}
+
+        {section('E', 'Vahan Details',
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', border: '1px solid #d0d0d0' }}>
+            {vahanFields.map((label, index) => (
+              <div key={label} style={{ minHeight: 33, padding: '6px 8px', borderBottom: '1px solid #ededed', borderRight: index % 2 === 0 ? '1px solid #ededed' : 'none', fontSize: 9.5 }}>
+                <b>{label}</b>
+                <div style={{ marginTop: 3, color: '#999' }}>— API value will be populated later —</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {section('F', 'Challan Details',
+          <div style={{ border: '1px solid #d0d0d0' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '45px 1.2fr 1fr 1fr 90px', background: '#f3f3f3', fontWeight: 800, fontSize: 9.5, borderBottom: '1px solid #d0d0d0' }}>
+              <div style={{ padding: 6 }}>Sr.</div><div style={{ padding: 6 }}>Challan No.</div><div style={{ padding: 6 }}>Date</div><div style={{ padding: 6 }}>Offence</div><div style={{ padding: 6 }}>Amount</div>
+            </div>
+            {Array.from({ length: 9 }, (_, i) => i + 1).map(n => (
+              <div key={n} style={{ display: 'grid', gridTemplateColumns: '45px 1.2fr 1fr 1fr 90px', fontSize: 9.5, borderBottom: '1px solid #ededed' }}>
+                <div style={{ padding: 6 }}>{n}</div><div style={{ padding: 6 }}>—</div><div style={{ padding: 6 }}>—</div><div style={{ padding: 6 }}>—</div><div style={{ padding: 6 }}>—</div>
+              </div>
+            ))}
+            <div style={{ padding: 7, color: '#777', fontSize: 9 }}>Challan data intentionally blank until API integration.</div>
+          </div>
+        )}
+
+        {section('', 'Disclaimer / Notes',
+          <div style={{ fontSize: 9.5, lineHeight: 1.55 }}>
+            <p style={{ margin: '3px 0 7px' }}>This inspection summary report is compiled based on information provided to us including title documents, MMV, year, condition, odometer reading and external examination of the vehicle/components.</p>
+            <p style={{ margin: '3px 0 7px' }}>The report will not tell you about hidden defects or problems which cannot be identified by a visual inspection.</p>
+            <p style={{ margin: '3px 0 0' }}>To check the genuinity of condition report please scan the QR code on 1st page of report.</p>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #cfcfcf', marginTop: 14, paddingTop: 8, fontSize: 8.5, color: '#666' }}>
+          <span>Date of Inspection</span>
+          <span>Certificate No.: {String(caseItem.case_id || '').replace(/^CASE-/, '')}</span>
+          <span>CarDekho INSPECTION</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function Field({
