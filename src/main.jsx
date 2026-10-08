@@ -44,6 +44,9 @@ function App() {
   const [editCase, setEditCase] = useState(null)
   const [assignCase, setAssignCase] = useState(null)
   const [remarkCase, setRemarkCase] = useState(null)
+  const [rejectCase, setRejectCase] = useState(null)
+  const [rejectReason, setRejectReason] = useState('')
+  const [rejectRemarks, setRejectRemarks] = useState('')
   const [remarkText, setRemarkText] = useState('')
   const [actionError, setActionError] = useState('')
   const [actionSaving, setActionSaving] = useState(false)
@@ -728,6 +731,67 @@ function App() {
     setActionError('')
     setRemarkText('')
     setRemarkCase(item)
+  }
+
+  function openRejectCase(item) {
+    setActionError('')
+    setRejectReason('')
+    setRejectRemarks('')
+    setRejectCase(item)
+  }
+
+  async function rejectOpenCase() {
+    if (!rejectCase) {
+      setActionError('No case selected.')
+      return
+    }
+
+    const reason = rejectReason.trim()
+    const remarks = rejectRemarks.trim()
+
+    if (!reason) {
+      setActionError('Reject reason is mandatory.')
+      return
+    }
+
+    setActionSaving(true)
+    setActionError('')
+
+    try {
+      const { data, error } = await supabase
+        .from('cases')
+        .update({ status: 'REJECTED' })
+        .eq('id', rejectCase.id)
+        .eq('status', 'OPEN')
+        .select()
+        .single()
+
+      if (error) throw new Error(error.message)
+
+      const { error: auditError } = await supabase
+        .from('audit_trail')
+        .insert({
+          case_id: rejectCase.case_id,
+          action: 'Rejected',
+          stage: 'OPEN',
+          old_status: 'OPEN',
+          new_status: 'REJECTED',
+          reason,
+          remarks: remarks || null
+        })
+
+      if (auditError) throw new Error(auditError.message)
+
+      setRejectCase(null)
+      setRejectReason('')
+      setRejectRemarks('')
+      await loadCases()
+    } catch (error) {
+      console.error('Reject lead error:', error)
+      setActionError(error?.message || 'Unable to reject lead.')
+    } finally {
+      setActionSaving(false)
+    }
   }
 
   async function saveRemark() {
@@ -1535,6 +1599,15 @@ function App() {
                               >
                                 <MessageSquare size={16} />
                               </button>
+
+                              <button
+                                type="button"
+                                title="Reject Lead"
+                                aria-label="Reject Lead"
+                                onClick={() => openRejectCase(item)}
+                              >
+                                <X size={16} />
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -2137,6 +2210,123 @@ function App() {
                 disabled={actionSaving}
               >
                 <UserPlus size={16} /> Assign TPA
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {rejectCase && (
+          <Modal
+            title={`Reject Lead — CASE-${rejectCase.case_id}`}
+            close={() => {
+              if (!actionSaving) {
+                setRejectCase(null)
+                setRejectReason('')
+                setRejectRemarks('')
+                setActionError('')
+              }
+            }}
+          >
+            {actionError && (
+              <div
+                className="panel"
+                style={{
+                  marginBottom: 12,
+                  border: '1px solid #fecaca',
+                  background: '#fff1f2'
+                }}
+              >
+                <strong>Unable to reject lead</strong>
+                <p>{actionError}</p>
+              </div>
+            )}
+
+            <div
+              className="panel"
+              style={{
+                marginBottom: 12,
+                border: '1px solid #fecaca',
+                background: '#fff7f7'
+              }}
+            >
+              <strong>Rejecting this OPEN lead</strong>
+              <p style={{ marginBottom: 0 }}>
+                The case will move from OPEN to REJECTED and the rejection
+                reason will be stored in the audit trail.
+              </p>
+            </div>
+
+            <div className="form-grid">
+              <Field
+                label="Case ID"
+                value={`CASE-${rejectCase.case_id}`}
+                disabled
+              />
+
+              <Field
+                label="Customer"
+                value={rejectCase.customer_name || ''}
+                disabled
+              />
+
+              <label className="field" style={{ width: '100%' }}>
+                <span>
+                  Reject Reason <b style={{ color: '#dc2626' }}>*</b>
+                </span>
+                <textarea
+                  value={rejectReason}
+                  onChange={e => setRejectReason(e.target.value)}
+                  placeholder="Enter mandatory rejection reason"
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    resize: 'vertical',
+                    padding: 10,
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 8,
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </label>
+
+              <label className="field" style={{ width: '100%' }}>
+                <span>Additional Remarks</span>
+                <textarea
+                  value={rejectRemarks}
+                  onChange={e => setRejectRemarks(e.target.value)}
+                  placeholder="Enter additional remarks (optional)"
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    resize: 'vertical',
+                    padding: 10,
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 8,
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+              <button
+                type="button"
+                className="primary"
+                style={{ background: '#64748b' }}
+                onClick={() => setRejectCase(null)}
+                disabled={actionSaving}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                className="primary"
+                style={{ background: '#dc2626' }}
+                onClick={rejectOpenCase}
+                disabled={actionSaving}
+              >
+                {actionSaving ? 'Rejecting...' : 'Reject Lead'}
               </button>
             </div>
           </Modal>
