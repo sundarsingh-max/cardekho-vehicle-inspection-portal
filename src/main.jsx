@@ -127,16 +127,12 @@ function App() {
     setLoading(true)
     setDbError('')
 
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 12000)
-
     try {
       const { data, error } = await supabase
         .from('cases')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(1000)
-        .abortSignal(controller.signal)
 
       if (error) {
         console.error('Supabase cases error:', error)
@@ -147,13 +143,9 @@ function App() {
       }
     } catch (error) {
       console.error('Supabase cases request failed:', error)
-      const message = error?.name === 'AbortError'
-        ? 'Supabase connection timed out after 12 seconds. Please click Refresh and try again.'
-        : (error?.message || 'Unable to load cases from Supabase.')
-      setDbError(message)
+      setDbError(error?.message || 'Unable to load cases from Supabase.')
       setCases([])
     } finally {
-      clearTimeout(timeoutId)
       setLoading(false)
     }
   }
@@ -1080,6 +1072,57 @@ function App() {
     setTpaQcForm(buildTpaQcForm(item))
   }
 
+  function openQcCase(item) {
+    setTpaQcCase(item)
+    setActive('QC')
+    setTpaQcMessage('')
+    setTpaQcForm(buildTpaQcForm(item))
+  }
+
+  async function qcApproveCase(item) {
+    if (!item) return
+    setActionSaving(true)
+    setActionError('')
+    try {
+      const { error } = await supabase.from('cases').update({ status: 'PRICING' }).eq('id', item.id).eq('status', 'QC')
+      if (error) throw new Error(error.message)
+      const { error: auditError } = await supabase.from('audit_trail').insert({
+        case_id: item.case_id, action: 'QC Approved', stage: 'QC', old_status: 'QC', new_status: 'PRICING',
+        reason: null, remarks: null, user_id: null, user_name: 'SS Sundar Singh', role: 'Admin'
+      })
+      if (auditError) console.error('QC approval audit error:', auditError)
+      setTpaQcCase(null)
+      setTpaQcForm({})
+      await loadCases()
+    } catch (error) {
+      console.error('QC approve error:', error)
+      setActionError(error?.message || 'Unable to approve QC case.')
+    } finally { setActionSaving(false) }
+  }
+
+  async function qcHoldCase(item) {
+    if (!item) return
+    const reason = window.prompt('Enter mandatory QC Hold reason:')
+    if (!reason || !reason.trim()) return
+    setActionSaving(true)
+    setActionError('')
+    try {
+      const { error } = await supabase.from('cases').update({ status: 'QC_HOLD' }).eq('id', item.id).eq('status', 'QC')
+      if (error) throw new Error(error.message)
+      const { error: auditError } = await supabase.from('audit_trail').insert({
+        case_id: item.case_id, action: 'QC Hold', stage: 'QC', old_status: 'QC', new_status: 'QC_HOLD',
+        reason: reason.trim(), remarks: reason.trim(), user_id: null, user_name: 'SS Sundar Singh', role: 'Admin'
+      })
+      if (auditError) console.error('QC hold audit error:', auditError)
+      setTpaQcCase(null)
+      setTpaQcForm({})
+      await loadCases()
+    } catch (error) {
+      console.error('QC hold error:', error)
+      setActionError(error?.message || 'Unable to put case on QC Hold.')
+    } finally { setActionSaving(false) }
+  }
+
   function buildTpaQcForm(item) {
     return {
       registration_number: item?.registration_number || '', rto: item?.rto || '',
@@ -1089,7 +1132,7 @@ function App() {
       loan_number: item?.loan_number || '', rc_available: item?.rc_available || '', insurance_type: item?.insurance_type || '', insurance_validity: item?.insurance_validity || '',
       insurance_expiry: item?.insurance_expiry || '', third_party_validity: item?.third_party_validity || '', hypothecation: item?.hypothecation || '', financier: item?.financier || '',
       cng_fitment: item?.cng_fitment || '', cng_category: item?.cng_category || '', road_tax_validity: item?.road_tax_validity || '', road_tax_date: item?.road_tax_date || '',
-      customer_name: item?.customer_name || '', proposer_name: item?.proposer_name || '', client_name: item?.client_name || item?.client || '', cng_validity: item?.cng_validity || '',
+      customer_name: item?.customer_name || '', proposer_name: item?.proposer_name || '', client_name: item?.client_name || '', cng_validity: item?.cng_validity || '',
       key_available: item?.key_available || '', inspection_type: item?.inspection_type || 'Physical Inspection', inspection_site: item?.city || '', remarks: '',
       overall_score: '', body_score: '', exterior_score: '', light_score: '', tyre_score: '', other_score: '', condition: '', detailed: {}, media: {}
     }
@@ -1349,28 +1392,21 @@ function App() {
     setActionError('')
 
     try {
-      const payload = {
-        case_id: remarkCase.case_id,
-        action: 'Remark Added',
-        stage: displayStatus(remarkCase.status || 'OPEN'),
-        old_status: remarkCase.status || 'OPEN',
-        new_status: remarkCase.status || 'OPEN',
-        remarks: text,
-        user_id: null,
-        user_name: 'SS Sundar Singh',
-        role: 'Admin'
-      }
+      const { error } = await supabase
+        .from('audit_trail')
+        .insert({
+          case_id: remarkCase.case_id,
+          action: 'Remark Added',
+          stage: 'OPEN',
+          old_status: remarkCase.status || 'OPEN',
+          new_status: remarkCase.status || 'OPEN',
+          remarks: text
+        })
 
-      let result = await supabase.from('audit_trail').insert(payload)
-      if (result.error && /fetch|network|timeout/i.test(String(result.error.message || ''))) {
-        await new Promise(resolve => setTimeout(resolve, 900))
-        result = await supabase.from('audit_trail').insert(payload)
-      }
-      if (result.error) throw new Error(result.error.message)
+      if (error) throw new Error(error.message)
 
       setRemarkCase(null)
       setRemarkText('')
-      setActionError('')
       await loadCases()
     } catch (error) {
       setActionError(
@@ -2576,10 +2612,9 @@ function App() {
         ) : active === 'TPA QC' ? (
 
           <TpaQcReport
+            mode="TPA QC"
             caseItem={tpaQcCase}
             cases={cases}
-            clients={clients}
-            locations={locations}
             form={tpaQcForm}
             updateField={updateTpaQcField}
             setForm={setTpaQcForm}
@@ -2591,6 +2626,27 @@ function App() {
             onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)}
             onReject={() => tpaQcCase && openRejectCase(tpaQcCase)}
             onHistory={() => tpaQcCase && openHistory(tpaQcCase)}
+          />
+
+        ) : active === 'QC' ? (
+
+          <TpaQcReport
+            mode="QC"
+            readOnly
+            caseItem={tpaQcCase}
+            cases={cases}
+            form={tpaQcForm}
+            updateField={updateTpaQcField}
+            setForm={setTpaQcForm}
+            saving={actionSaving}
+            message={actionError}
+            onOpenCase={openQcCase}
+            onSave={() => {}}
+            onSubmit={() => tpaQcCase && qcApproveCase(tpaQcCase)}
+            onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)}
+            onReject={() => tpaQcCase && openRejectCase(tpaQcCase)}
+            onHistory={() => tpaQcCase && openHistory(tpaQcCase)}
+            onHold={() => tpaQcCase && qcHoldCase(tpaQcCase)}
           />
 
         ) : (
@@ -3617,17 +3673,17 @@ function App() {
   )
 }
 
-function TpaQcReport({ caseItem, cases = [], clients = [], locations = [], form, updateField, setForm, saving, message, onOpenCase, onSave, onSubmit, onRemarks, onReject, onHistory }) {
+function TpaQcReport({ mode = 'TPA QC', readOnly = false, caseItem, cases = [], form, updateField, setForm, saving, message, onOpenCase, onSave, onSubmit, onRemarks, onReject, onHistory, onHold }) {
   if (!caseItem) {
     const normalize = value => String(value || '').trim().toUpperCase().replace(/-/g, '_').replace(/\s+/g, '_')
-    const tpaQcCases = cases.filter(item => normalize(item.status) === 'PRE_QC')
+    const tpaQcCases = cases.filter(item => normalize(item.status) === (mode === 'QC' ? 'QC' : 'PRE_QC'))
 
     return (
       <section className="panel" style={{ padding: 18 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div>
-            <h2 style={{ margin: 0 }}>TPA QC</h2>
-            <p style={{ margin: '5px 0 0', color: '#64748b' }}>Cases moved from Assign/Reassign to TPA QC. Open a case below to continue the same inspection report.</p>
+            <h2 style={{ margin: 0 }}>{mode}</h2>
+            <p style={{ margin: '5px 0 0', color: '#64748b' }}>mode === 'QC' ? 'Cases submitted from TPA QC. Open a case below for QC review.' : 'Cases moved from Assign/Reassign to TPA QC. Open a case below to continue the same inspection report.</p>
           </div>
           <span style={{ padding: '6px 10px', borderRadius: 999, background: '#E0F2F1', color: '#0f766e', fontWeight: 700, fontSize: 12 }}>
             {tpaQcCases.length} Pending
@@ -3658,9 +3714,9 @@ function TpaQcReport({ caseItem, cases = [], clients = [], locations = [], form,
                     <td style={{ padding: '11px 8px' }}>{item.registration_number || '—'}</td>
                     <td style={{ padding: '11px 8px' }}>{[item.make, item.model, item.variant].filter(Boolean).join(' ') || '—'}</td>
                     <td style={{ padding: '11px 8px' }}>{item.assigned_tpa_name || '—'}</td>
-                    <td style={{ padding: '11px 8px' }}><span style={{ padding: '4px 8px', borderRadius: 999, background: '#E0F2F1', color: '#0f766e', fontSize: 11, fontWeight: 700 }}>TPA QC</span></td>
+                    <td style={{ padding: '11px 8px' }}><span style={{ padding: '4px 8px', borderRadius: 999, background: mode === 'QC' ? '#dbeafe' : '#E0F2F1', color: mode === 'QC' ? '#1d4ed8' : '#0f766e', fontSize: 11, fontWeight: 700 }}>{mode}</span></td>
                     <td style={{ padding: '11px 8px' }}>
-                      <button type="button" className="primary" onClick={() => onOpenCase(item)}>Open TPA QC</button>
+                      <button type="button" className="primary" onClick={() => onOpenCase(item)}>Open {mode}</button>
                     </td>
                   </tr>
                 ))}
@@ -3672,63 +3728,19 @@ function TpaQcReport({ caseItem, cases = [], clients = [], locations = [], form,
     )
   }
 
-  const dateValue = value => {
-    const text = String(value || '').trim()
-    return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : ''
-  }
-
-  const selectField = (label, key, options, disabled = false) => (
+  const reportField = (label, key, disabled = false) => (
     <label style={{ display: 'grid', gridTemplateColumns: '145px 1fr', alignItems: 'center', gap: 8, fontSize: 10, minHeight: 27 }}>
       <span style={{ fontWeight: 700, color: '#222' }}>{label}</span>
-      <select value={form[key] || ''} disabled={disabled} onChange={e => updateField(key, e.target.value)}
-        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '2px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: disabled ? '#f7f7f7' : '#fff' }}>
-        <option value="">Select</option>
-        {options.map(option => <option key={option} value={option}>{option}</option>)}
-      </select>
+      <input
+        value={form[key] || ''}
+        disabled={disabled || readOnly}
+        onChange={e => updateField(key, e.target.value)}
+        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '3px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: disabled ? '#f7f7f7' : '#fff' }}
+      />
     </label>
   )
 
-  const dateField = (label, key, disabled = false) => (
-    <label style={{ display: 'grid', gridTemplateColumns: '145px 1fr', alignItems: 'center', gap: 8, fontSize: 10, minHeight: 27 }}>
-      <span style={{ fontWeight: 700, color: '#222' }}>{label}</span>
-      <input type="date" value={dateValue(form[key])} disabled={disabled} onChange={e => updateField(key, e.target.value)}
-        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '2px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: disabled ? '#f7f7f7' : '#fff' }} />
-    </label>
-  )
-
-  const textField = (label, key, disabled = false) => (
-    <label style={{ display: 'grid', gridTemplateColumns: '145px 1fr', alignItems: 'center', gap: 8, fontSize: 10, minHeight: 27 }}>
-      <span style={{ fontWeight: 700, color: '#222' }}>{label}</span>
-      <input value={form[key] || ''} disabled={disabled} onChange={e => updateField(key, e.target.value)}
-        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '3px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: disabled ? '#f7f7f7' : '#fff' }} />
-    </label>
-  )
-
-  const fuelOptions = ['DIESEL','PETROL','CNG','LPG','ELECTRIC','HYBRID','PETROL+CNG']
-  const transmissionOptions = ['MANUAL','AUTOMATIC','iMT','AT','AMT','CVT','DCT']
-  const colorOptions = ['Beige','Black','Blue','Bronze','Brown','Gold','Gray','Green','Maroon','Navy Blue','Orange','Pink','Purple','Red','Silver','Sky Blue','Teal','White','Yellow']
-  const bodyTypeOptions = ['Hatchback','Sedan','SUV','MUV','MPV','Coupe','Convertible','Pickup','Truck','Wagon','Crossover','Van','Limousine']
-  const yesNoOptions = ['YES','NO']
-  const insuranceOptions = ['Comprehensive','Third Party']
-  const inspectionOptions = ['Physical Inspection','Digital Inspection']
-
-  const financierOptions = [
-    'State Bank of India','Bank of Baroda','Punjab National Bank','Canara Bank','Union Bank of India','Bank of India',
-    'Indian Bank','Central Bank of India','Indian Overseas Bank','UCO Bank','Bank of Maharashtra','Punjab & Sind Bank',
-    'HDFC Bank','ICICI Bank','Axis Bank','Kotak Mahindra Bank','IndusInd Bank','IDFC FIRST Bank','Federal Bank',
-    'YES BANK','RBL Bank','AU Small Finance Bank','Ujjivan Small Finance Bank','Equitas Small Finance Bank',
-    'Bajaj Finance','Tata Capital','Mahindra Finance','Cholamandalam Investment and Finance','Shriram Finance',
-    'Muthoot Finance','Manappuram Finance','L&T Finance','Aditya Birla Finance','Hero FinCorp','TVS Credit',
-    'HDB Financial Services','Hinduja Leyland Finance','Sundaram Finance','Magma Finance','Poonawalla Fincorp',
-    'Clix Capital','DMI Finance','KreditBee','Lendingkart','IIFL Finance','JM Financial','Sammaan Capital',
-    'Home First Finance','Aavas Financiers','Five-Star Business Finance','Aptus Value Housing Finance'
-  ]
-
-  const cityOptions = [...new Set(
-    locations.map(row => firstValue(row, ['city','CITY','City'])).filter(Boolean).map(v => String(v).trim())
-  )].sort((a,b) => a.localeCompare(b))
-
-  const ratingOptions = ['Good', 'Average', 'Bad', 'Scratched', 'Dented', 'Ok', 'Available', 'Not Available', 'Not Applicable']
+  const ratingOptions = ['Good', 'Scratched', 'Dented', 'Ok', 'Available', 'Not Available', 'Not Applicable']
 
   // Inspection rating -> score. "Not Applicable" is excluded from averages.
   const ratingToScore = {
@@ -3737,8 +3749,6 @@ function TpaQcReport({ caseItem, cases = [], clients = [], locations = [], form,
     Available: 10,
     Scratched: 7,
     Dented: 5,
-    Average: 5,
-    Bad: 0,
     'Not Available': 0
   }
 
@@ -3807,8 +3817,8 @@ function TpaQcReport({ caseItem, cases = [], clients = [], locations = [], form,
   const media = [
     'Profile Picture', 'Right View', 'Right Quarter Panel', 'Rear View', 'Left Quarter Panel', 'Left View', 'Left Side Profile Pic', 'Front View',
     'Engine Compartment 1', 'Engine Compartment 2', 'Engine Compartment 3', 'Boot / Dicky', 'Front Windscreen', 'Windscreen - Interior (from rear seat)',
-    'Dashboard', 'Odometer Reading', 'ABC Pedals (from driver seat)', 'Selfie with Vehicle', 'Other Images 1', 'Other Images 2', 'Other Images 3',
-    'VIN Plate Photo', 'Chassis Imprint', 'Pencil Tracing'
+    'Dashboard', 'Odometer Reading 1', 'Odometer Reading 2', 'ABC Pedals (from driver seat)', 'Selfie with Vehicle', 'Other Images 1', 'Other Images 2', 'Other Images 3',
+    'VIN Plate Photo', 'Chassis Imprint 1', 'Chassis Imprint 2', 'Pencil Tracing 1', 'Pencil Tracing 2'
   ]
 
   const vahanFields = ['Registration Number','Manufacturing Date','Registered RTO','Registration Date','Owner Name','RC Blacklist Status','Owner Count','Fitness Upto','Owner Permanent Address','Name of Financier','Owner Present Address','Insurer','Vehicle Name','Policy Number','Make','Insurance Valid Upto','Model','PUCC Number','Vehicle Category','PUCC Valid Upto','Vehicle Class','NP Issued By','Wheel Base','NP Number','Chassis Number','NP Valid Upto','Engine Number','Permit Issue Date','Car Color','Permit Number','Fuel Type','Permit Type','Fuel Norms','Permit Valid From','Engine Capacity','Permit Valid Upto','Gross Vehicle Weight','RC Tax Upto','Seating Capacity','Body Type','Sleeper Capacity']
@@ -3845,15 +3855,20 @@ function TpaQcReport({ caseItem, cases = [], clients = [], locations = [], form,
       <div className="panel" style={{ marginBottom: 12, position: 'sticky', top: 0, zIndex: 5 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div>
-            <h2 style={{ margin: 0 }}>TPA QC — Vehicle Inspection Report</h2>
+            <h2 style={{ margin: 0 }}>{mode} — Vehicle Inspection Report</h2>
             <small>{caseItem.case_id} · {caseItem.registration_number || 'Registration not available'} · Single-page merged report</small>
           </div>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-            <button className="primary" type="button" onClick={onSave} disabled={saving}><Save size={15} /> {saving ? 'Saving...' : 'Save Draft'}</button>
+            {!readOnly && <button className="primary" type="button" onClick={onSave} disabled={saving}><Save size={15} /> {saving ? 'Saving...' : 'Save Draft'}</button>}
             <button type="button" onClick={onRemarks}>Remarks</button>
             <button type="button" onClick={onReject}>Reject</button>
             <button type="button" onClick={onHistory}>History</button>
-            <button className="primary" type="button" onClick={onSubmit} disabled={saving}>Submit to QC</button>
+            {mode === 'QC' ? (<>
+              <button type="button" onClick={onHold} disabled={saving}>QC Hold</button>
+              <button className="primary" type="button" onClick={onSubmit} disabled={saving}>Approve &amp; Send to Pricing</button>
+            </>) : (
+              <button className="primary" type="button" onClick={onSubmit} disabled={saving}>Submit to QC</button>
+            )}
           </div>
         </div>
         {message && <div style={{ marginTop: 8, padding: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: 12 }}>{message}</div>}
@@ -3868,36 +3883,36 @@ function TpaQcReport({ caseItem, cases = [], clients = [], locations = [], form,
 
         {section('A', 'Vehicle Details',
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 24, rowGap: 1 }}>
-            {textField('Registration No.', 'registration_number', true)}
-            {textField('RTO', 'rto')}
-            {dateField('Manufacturing Date', 'manufacturing_date')}
-            {dateField('Registration Date', 'registration_date')}
-            {textField('No. of Owners', 'owner_count')}
-            {textField('Odometer Reading', 'odometer')}
-            {selectField('Fuel Type', 'fuel', fuelOptions)}
-            {selectField('Transmission', 'transmission', transmissionOptions)}
-            {selectField('Color', 'color', colorOptions)}
-            {selectField('Body Type', 'body_type', bodyTypeOptions)}
-            {textField('Engine Number', 'engine_number')}
-            {textField('Chassis Number', 'chassis_number')}
-            {textField('Loan No./Ref. No.', 'loan_number')}
-            {selectField('RC Available', 'rc_available', yesNoOptions)}
-            {selectField('Insurance Type', 'insurance_type', insuranceOptions)}
-            {dateField('Insurance Validity', 'insurance_validity')}
-            {dateField('Insurance Expiry', 'insurance_expiry')}
-            {dateField('Third Party Validity', 'third_party_validity')}
-            {selectField('Hypothecation', 'hypothecation', yesNoOptions)}
-            {selectField('Financier', 'financier', financierOptions)}
-            {selectField('CNG/LPG Fitment', 'cng_fitment', yesNoOptions)}
-            {selectField('CNG/LPG Category', 'cng_category', yesNoOptions)}
-            {dateField('Road Tax Validity', 'road_tax_validity')}
-            {dateField('Road Tax Date', 'road_tax_date')}
-            {textField('Customer Name', 'customer_name', true)}
-            {textField('Client Name', 'client_name', true)}
-            {dateField('CNG Validity Date', 'cng_validity')}
-            {selectField('Key Available', 'key_available', yesNoOptions)}
-            {selectField('Inspection Type', 'inspection_type', inspectionOptions)}
-            {selectField('Inspection Site', 'inspection_site', cityOptions)}
+            {reportField('Registration No.', 'registration_number')}
+            {reportField('RTO', 'rto')}
+            {reportField('Manufacturing Date', 'manufacturing_date')}
+            {reportField('Registration Date', 'registration_date')}
+            {reportField('No. of Owners', 'owner_count')}
+            {reportField('Odometer Reading', 'odometer')}
+            {reportField('Fuel Type', 'fuel')}
+            {reportField('Transmission', 'transmission')}
+            {reportField('Color', 'color')}
+            {reportField('Body Type', 'body_type')}
+            {reportField('Engine Number', 'engine_number')}
+            {reportField('Chassis Number', 'chassis_number')}
+            {reportField('Loan No./Ref. No.', 'loan_number')}
+            {reportField('RC Available', 'rc_available')}
+            {reportField('Insurance Type', 'insurance_type')}
+            {reportField('Insurance Validity', 'insurance_validity')}
+            {reportField('Insurance Expiry', 'insurance_expiry')}
+            {reportField('Third Party Validity', 'third_party_validity')}
+            {reportField('Hypothecation', 'hypothecation')}
+            {reportField('Financier', 'financier')}
+            {reportField('CNG/LPG Fitment', 'cng_fitment')}
+            {reportField('CNG/LPG Category', 'cng_category')}
+            {reportField('Road Tax Validity', 'road_tax_validity')}
+            {reportField('Road Tax Date', 'road_tax_date')}
+            {reportField('Customer Name', 'customer_name')}
+            {reportField('Client Name', 'client_name')}
+            {reportField('CNG Validity Date', 'cng_validity')}
+            {reportField('Key Available', 'key_available')}
+            {reportField('Inspection Type', 'inspection_type')}
+            {reportField('Inspection Site', 'inspection_site')}
           </div>
         )}
 
@@ -3949,6 +3964,7 @@ function TpaQcReport({ caseItem, cases = [], clients = [], locations = [], form,
                           <select
                             value={bulkValue}
                             onChange={e => applyGroupRating(e.target.value)}
+                            disabled={readOnly}
                             style={{ width: 125, height: 23, border: '1px solid #999', borderRadius: 0, fontSize: 9.5, background: '#fff' }}
                             title={`Apply one rating to all ${group.title} parameters`}
                           >
@@ -3964,6 +3980,7 @@ function TpaQcReport({ caseItem, cases = [], clients = [], locations = [], form,
                               <select
                                 value={form.detailed?.[row] || ''}
                                 onChange={e => setForm(prev => ({ ...prev, detailed: { ...(prev.detailed || {}), [row]: e.target.value } }))}
+                                disabled={readOnly}
                                 style={{ height: 22, border: '1px solid #aaa', borderRadius: 0, fontSize: 9.5 }}
                               >
                                 <option value="">Select</option>
@@ -4028,11 +4045,11 @@ function TpaQcReport({ caseItem, cases = [], clients = [], locations = [], form,
                     {imageSrc ? <img src={imageSrc} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <span style={{ fontSize: 9, color: '#888' }}>No Image</span>}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 5 }}>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, cursor: 'pointer' }}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, cursor: readOnly ? 'default' : 'pointer', opacity: readOnly ? 0.55 : 1, pointerEvents: readOnly ? 'none' : 'auto' }}>
                       <Upload size={11} /> {imageSrc ? 'Replace' : 'Upload'}
-                      <input type="file" accept="image/*" onChange={handlePhotoUpload} style={{ display: 'none' }} />
+                      <input type="file" accept="image/*" onChange={handlePhotoUpload} disabled={readOnly} style={{ display: 'none' }} />
                     </label>
-                    {imageSrc && <button type="button" onClick={removePhoto} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: 9, color: '#c00', cursor: 'pointer' }}>Remove</button>}
+                    {imageSrc && !readOnly && <button type="button" onClick={removePhoto} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: 9, color: '#c00', cursor: 'pointer' }}>Remove</button>}
                   </div>
                   {imageName && <div title={imageName} style={{ marginTop: 3, fontSize: 8, color: '#777', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{imageName}</div>}
                 </div>
