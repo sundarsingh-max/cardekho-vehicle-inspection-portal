@@ -1088,7 +1088,7 @@ function App() {
       const { error: updateError } = await supabase
         .from('cases')
         .update({
-          status: 'REASSIGNED',
+          status: 'ASSIGNED',
           assigned_tpa_id: tpa.id,
           assigned_tpa_name: tpa.name
         })
@@ -1110,7 +1110,7 @@ function App() {
 
       if (
         !verifiedCase ||
-        verifiedCase.status !== 'REASSIGNED' ||
+        verifiedCase.status !== 'ASSIGNED' ||
         String(verifiedCase.assigned_tpa_id || '') !== String(tpa.id)
       ) {
         throw new Error(
@@ -1143,7 +1143,7 @@ function App() {
           action: 'Reassigned',
           stage: 'ASSIGN',
           old_status: reassignCase.status || 'ASSIGNED',
-          new_status: 'REASSIGNED',
+          new_status: 'ASSIGNED',
           reason,
           remarks: remarks || null,
           user_id: null,
