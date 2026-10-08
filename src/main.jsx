@@ -1605,17 +1605,26 @@ function App() {
                 </em>
               </div>
 
-              <div className="card">
-                <small>Pre QC</small>
+              <button
+                type="button"
+                className="card"
+                onClick={() => {
+                  setTpaQcCase(null)
+                  setActive('TPA QC')
+                }}
+                style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid #e2e8f0' }}
+                title="Open TPA QC cases"
+              >
+                <small>TPA QC</small>
                 <strong>
                   {loading
                     ? '...'
                     : counts.preQc}
                 </strong>
                 <em>
-                  Live database count
+                  Click to open TPA QC queue
                 </em>
-              </div>
+              </button>
 
               <div className="card">
                 <small>QC Hold</small>
@@ -2547,11 +2556,13 @@ function App() {
 
           <TpaQcReport
             caseItem={tpaQcCase}
+            cases={cases}
             form={tpaQcForm}
             updateField={updateTpaQcField}
             setForm={setTpaQcForm}
             saving={tpaQcSaving}
             message={tpaQcMessage}
+            onOpenCase={openTpaQcCase}
             onSave={() => saveTpaQcDraft(false)}
             onSubmit={() => saveTpaQcDraft(true)}
             onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)}
@@ -3583,13 +3594,57 @@ function App() {
   )
 }
 
-function TpaQcReport({ caseItem, form, updateField, setForm, saving, message, onSave, onSubmit, onRemarks, onReject, onHistory }) {
+function TpaQcReport({ caseItem, cases = [], form, updateField, setForm, saving, message, onOpenCase, onSave, onSubmit, onRemarks, onReject, onHistory }) {
   if (!caseItem) {
+    const normalize = value => String(value || '').trim().toUpperCase().replace(/-/g, '_').replace(/\s+/g, '_')
+    const tpaQcCases = cases.filter(item => normalize(item.status) === 'PRE_QC')
+
     return (
-      <section className="panel empty">
-        <Database />
-        <h2>TPA QC</h2>
-        <p>Select an Assigned/Reassigned case from Reassign to start the inspection report.</p>
+      <section className="panel" style={{ padding: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div>
+            <h2 style={{ margin: 0 }}>TPA QC</h2>
+            <p style={{ margin: '5px 0 0', color: '#64748b' }}>Cases moved from Assign/Reassign to TPA QC. Open a case below to continue the same inspection report.</p>
+          </div>
+          <span style={{ padding: '6px 10px', borderRadius: 999, background: '#E0F2F1', color: '#0f766e', fontWeight: 700, fontSize: 12 }}>
+            {tpaQcCases.length} Pending
+          </span>
+        </div>
+
+        {tpaQcCases.length === 0 ? (
+          <div className="panel empty" style={{ marginTop: 10 }}>
+            <Database />
+            <h3>No TPA QC cases</h3>
+            <p>Move a case from Assign/Reassign using the TPA QC action.</p>
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr>
+                  {['Lead ID','Customer','Registration No.','Vehicle','Current TPA','Status','Action'].map(h => (
+                    <th key={h} style={{ textAlign: 'left', padding: '10px 8px', borderBottom: '1px solid #e2e8f0', color: '#0f172a' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tpaQcCases.map(item => (
+                  <tr key={item.id}>
+                    <td style={{ padding: '11px 8px', fontWeight: 700 }}>CASE-{item.case_id}</td>
+                    <td style={{ padding: '11px 8px' }}>{item.customer_name || '—'}</td>
+                    <td style={{ padding: '11px 8px' }}>{item.registration_number || '—'}</td>
+                    <td style={{ padding: '11px 8px' }}>{[item.make, item.model, item.variant].filter(Boolean).join(' ') || '—'}</td>
+                    <td style={{ padding: '11px 8px' }}>{item.assigned_tpa_name || '—'}</td>
+                    <td style={{ padding: '11px 8px' }}><span style={{ padding: '4px 8px', borderRadius: 999, background: '#E0F2F1', color: '#0f766e', fontSize: 11, fontWeight: 700 }}>TPA QC</span></td>
+                    <td style={{ padding: '11px 8px' }}>
+                      <button type="button" className="primary" onClick={() => onOpenCase(item)}>Open TPA QC</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     )
   }
