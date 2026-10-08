@@ -3859,15 +3859,64 @@ function TpaQcReport({ caseItem, form, updateField, setForm, saving, message, on
 
         {section('D', 'Inspection Photos / Media',
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-            {media.map(name => (
-              <div key={name} style={{ border: '1px solid #cfcfcf', minHeight: 128, padding: 6, background: '#fff' }}>
-                <div style={{ fontWeight: 700, fontSize: 9, minHeight: 25 }}>{name}</div>
-                <div style={{ height: 75, background: '#f7f7f7', border: '1px solid #e2e2e2', display: 'grid', placeItems: 'center', fontSize: 9, color: '#888' }}>No Image</div>
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 5, fontSize: 9, cursor: 'pointer' }}><Upload size={11} /> Upload<input type="file" accept="image/*" style={{ display: 'none' }} /></label>
-              </div>
-            ))}
+            {media.map(name => {
+              const mediaItem = form.media?.[name]
+              const imageSrc = typeof mediaItem === 'string' ? mediaItem : mediaItem?.dataUrl
+              const imageName = typeof mediaItem === 'object' ? mediaItem?.name : ''
+
+              const handlePhotoUpload = event => {
+                const file = event.target.files?.[0]
+                event.target.value = ''
+                if (!file) return
+                if (!file.type.startsWith('image/')) {
+                  setForm(prev => ({ ...prev, mediaError: `${name}: Please select an image file.` }))
+                  return
+                }
+                if (file.size > 10 * 1024 * 1024) {
+                  setForm(prev => ({ ...prev, mediaError: `${name}: Image must be 10MB or smaller.` }))
+                  return
+                }
+                const reader = new FileReader()
+                reader.onload = () => {
+                  setForm(prev => ({
+                    ...prev,
+                    mediaError: '',
+                    media: {
+                      ...(prev.media || {}),
+                      [name]: { name: file.name, type: file.type, size: file.size, dataUrl: reader.result }
+                    }
+                  }))
+                }
+                reader.onerror = () => setForm(prev => ({ ...prev, mediaError: `${name}: Unable to read this image.` }))
+                reader.readAsDataURL(file)
+              }
+
+              const removePhoto = () => setForm(prev => {
+                const nextMedia = { ...(prev.media || {}) }
+                delete nextMedia[name]
+                return { ...prev, media: nextMedia, mediaError: '' }
+              })
+
+              return (
+                <div key={name} style={{ border: '1px solid #cfcfcf', minHeight: 128, padding: 6, background: '#fff' }}>
+                  <div style={{ fontWeight: 700, fontSize: 9, minHeight: 25 }}>{name}</div>
+                  <div style={{ height: 75, background: '#f7f7f7', border: '1px solid #e2e2e2', overflow: 'hidden', display: 'grid', placeItems: 'center' }}>
+                    {imageSrc ? <img src={imageSrc} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <span style={{ fontSize: 9, color: '#888' }}>No Image</span>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 5 }}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, cursor: 'pointer' }}>
+                      <Upload size={11} /> {imageSrc ? 'Replace' : 'Upload'}
+                      <input type="file" accept="image/*" onChange={handlePhotoUpload} style={{ display: 'none' }} />
+                    </label>
+                    {imageSrc && <button type="button" onClick={removePhoto} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: 9, color: '#c00', cursor: 'pointer' }}>Remove</button>}
+                  </div>
+                  {imageName && <div title={imageName} style={{ marginTop: 3, fontSize: 8, color: '#777', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{imageName}</div>}
+                </div>
+              )
+            })}
           </div>
         )}
+        {form.mediaError && <div style={{ marginTop: 7, padding: '6px 8px', background: '#fff5f5', border: '1px solid #f0b7b7', color: '#a00', fontSize: 9 }}>{form.mediaError}</div>}
 
         {section('', 'Exterior Video',
           <div style={{ border: '1px dashed #c8c8c8', padding: 10, fontSize: 10 }}>
