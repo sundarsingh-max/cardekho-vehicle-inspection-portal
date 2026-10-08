@@ -2308,6 +2308,7 @@ function App() {
             )}
 
           </section>
+
         ) : active === 'Reassign' ? (
 
           <section className="panel">
@@ -2324,7 +2325,7 @@ function App() {
               <div>
                 <h2 style={{ marginBottom: 4 }}>Reassign Cases</h2>
                 <p style={{ margin: 0 }}>
-                  Assigned and reassigned cases. Select a different active TPA to transfer the case.
+                  Manage cases already assigned to a TPA. Use the same actions available on Assign.
                 </p>
               </div>
 
@@ -2354,10 +2355,10 @@ function App() {
             )}
 
             {loading ? (
-              <p>Loading cases from Supabase...</p>
+              <p>Loading assigned cases from Supabase...</p>
             ) : (
               <>
-                <h3 style={{ marginBottom: 10 }}>Cases Available for Reassignment</h3>
+                <h3 style={{ marginBottom: 10 }}>Assigned / Reassigned Cases</h3>
 
                 {cases.filter(item => {
                   const status = String(item.status || '').trim().toUpperCase()
@@ -2365,17 +2366,15 @@ function App() {
                 }).length === 0 ? (
                   <div
                     style={{
-                      padding: 28,
+                      padding: 24,
                       textAlign: 'center',
                       border: '1px dashed #cbd5e1',
                       borderRadius: 12
                     }}
                   >
-                    <Database size={38} />
+                    <Database size={34} />
                     <h3>No Assigned Cases Found</h3>
-                    <p>
-                      Assign a case first. Assigned cases will appear here automatically.
-                    </p>
+                    <p>Assign an OPEN case first. It will appear here immediately.</p>
                   </div>
                 ) : (
                   <div style={{ overflowX: 'auto' }}>
@@ -2403,26 +2402,12 @@ function App() {
                               <td><strong>CASE-{item.case_id}</strong></td>
                               <td>{item.customer_name || '—'}</td>
                               <td>{item.registration_number || '—'}</td>
-                              <td>
-                                {[item.make, item.model, item.variant]
-                                  .filter(Boolean)
-                                  .join(' ') || '—'}
-                              </td>
+                              <td>{[item.make, item.model, item.variant].filter(Boolean).join(' ') || '—'}</td>
                               <td>{item.assigned_tpa_name || '—'}</td>
-                              <td>
-                                <span className="status">
-                                  {displayStatus(item.status)}
-                                </span>
-                              </td>
+                              <td><span className="status">{displayStatus(item.status)}</span></td>
                               <td>{formatDate(item.created_at)}</td>
                               <td>
-                                <div
-                                  style={{
-                                    display: 'flex',
-                                    gap: 6,
-                                    flexWrap: 'wrap'
-                                  }}
-                                >
+                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                   <button
                                     type="button"
                                     className="icon-button"
@@ -2432,7 +2417,6 @@ function App() {
                                   >
                                     <RefreshCw size={15} />
                                   </button>
-
                                   <button
                                     type="button"
                                     className="icon-button"
@@ -2442,7 +2426,6 @@ function App() {
                                   >
                                     <MessageSquare size={15} />
                                   </button>
-
                                   <button
                                     type="button"
                                     className="icon-button"
@@ -2452,7 +2435,6 @@ function App() {
                                   >
                                     <History size={15} />
                                   </button>
-
                                   <button
                                     type="button"
                                     className="icon-button"
@@ -2474,7 +2456,6 @@ function App() {
             )}
 
           </section>
-tion>
 
         ) : (
 
