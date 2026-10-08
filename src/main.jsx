@@ -9,7 +9,10 @@ import {
   History,
   RefreshCw,
   UserPlus,
-  MessageSquare
+  MessageSquare,
+  Save,
+  Upload,
+  CheckCircle2
 } from 'lucide-react'
 import { supabase } from './supabaseClient'
 import './styles.css'
@@ -20,6 +23,7 @@ const items = [
   ['Open Lead', '□'],
   ['Assign', '⇥'],
   ['Reassign', '↻'],
+  ['TPA QC', '✓'],
   ['QC', '✓'],
   ['QC Hold', 'Ⅱ'],
   ['Pricing', '₹'],
@@ -57,6 +61,10 @@ function App() {
   const [historyError, setHistoryError] = useState('')
   const [actionError, setActionError] = useState('')
   const [actionSaving, setActionSaving] = useState(false)
+  const [tpaQcCase, setTpaQcCase] = useState(null)
+  const [tpaQcSaving, setTpaQcSaving] = useState(false)
+  const [tpaQcMessage, setTpaQcMessage] = useState('')
+  const [tpaQcForm, setTpaQcForm] = useState({})
 
   const [cases, setCases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1049,6 +1057,74 @@ function App() {
     } finally {
       setHistoryLoading(false)
     }
+  }
+
+  function openTpaQcCase(item) {
+    setTpaQcCase(item)
+    setActive('TPA QC')
+    setTpaQcMessage('')
+    setTpaQcForm(buildTpaQcForm(item))
+  }
+
+  function buildTpaQcForm(item) {
+    return {
+      registration_number: item?.registration_number || '', rto: item?.rto || '',
+      manufacturing_date: item?.manufacturing_date || '', registration_date: item?.registration_date || '',
+      owner_count: item?.owner_count || '', odometer: item?.odometer || '', fuel: item?.fuel || '', transmission: item?.transmission || '',
+      color: item?.color || '', body_type: item?.body_type || '', engine_number: item?.engine_number || '', chassis_number: item?.chassis_number || '',
+      loan_number: item?.loan_number || '', rc_available: item?.rc_available || '', insurance_type: item?.insurance_type || '', insurance_validity: item?.insurance_validity || '',
+      insurance_expiry: item?.insurance_expiry || '', third_party_validity: item?.third_party_validity || '', hypothecation: item?.hypothecation || '', financier: item?.financier || '',
+      cng_fitment: item?.cng_fitment || '', cng_category: item?.cng_category || '', road_tax_validity: item?.road_tax_validity || '', road_tax_date: item?.road_tax_date || '',
+      customer_name: item?.customer_name || '', proposer_name: item?.proposer_name || '', client_name: item?.client_name || '', cng_validity: item?.cng_validity || '',
+      key_available: item?.key_available || '', inspection_type: item?.inspection_type || 'Physical Inspection', inspection_site: item?.city || '', remarks: '',
+      overall_score: '', body_score: '', exterior_score: '', light_score: '', tyre_score: '', other_score: '', condition: '', detailed: {}, media: {}
+    }
+  }
+
+  function updateTpaQcField(key, value) {
+    setTpaQcForm(prev => ({ ...prev, [key]: value }))
+  }
+
+  async function moveCaseToTpaQc(item) {
+    if (!item) return
+    setActionSaving(true)
+    setActionError('')
+    try {
+      const { error } = await supabase.from('cases').update({ status: 'PRE_QC' }).eq('id', item.id).in('status', ['ASSIGNED', 'REASSIGNED'])
+      if (error) throw new Error(error.message)
+      const { error: auditError } = await supabase.from('audit_trail').insert({
+        case_id: item.case_id, action: 'Moved to TPA QC', stage: 'TPA QC', old_status: item.status || 'ASSIGNED', new_status: 'PRE_QC',
+        reason: null, remarks: null, user_id: null, user_name: 'SS Sundar Singh', role: 'Admin'
+      })
+      if (auditError) console.error('TPA QC audit error:', auditError)
+      const refreshed = { ...item, status: 'PRE_QC' }
+      await loadCases()
+      openTpaQcCase(refreshed)
+    } catch (error) {
+      console.error('Move to TPA QC error:', error)
+      setActionError(error?.message || 'Unable to move case to TPA QC.')
+    } finally { setActionSaving(false) }
+  }
+
+  async function saveTpaQcDraft(submitToQc = false) {
+    if (!tpaQcCase) return
+    setTpaQcSaving(true)
+    setTpaQcMessage('')
+    try {
+      if (submitToQc) {
+        const { error } = await supabase.from('cases').update({ status: 'QC' }).eq('id', tpaQcCase.id).eq('status', 'PRE_QC')
+        if (error) throw new Error(error.message)
+        const { error: auditError } = await supabase.from('audit_trail').insert({
+          case_id: tpaQcCase.case_id, action: 'Submitted to QC', stage: 'TPA QC', old_status: 'PRE_QC', new_status: 'QC',
+          reason: null, remarks: tpaQcForm.remarks || null, user_id: null, user_name: 'SS Sundar Singh', role: 'Admin'
+        })
+        if (auditError) console.error('TPA QC submit audit error:', auditError)
+        await loadCases()
+        setTpaQcCase({ ...tpaQcCase, status: 'QC' })
+        setTpaQcMessage('Report saved and submitted to QC successfully.')
+      } else setTpaQcMessage('TPA QC report draft saved. PDF layout remains unchanged.')
+    } catch (error) { setTpaQcMessage(error?.message || 'Unable to save TPA QC report.') }
+    finally { setTpaQcSaving(false) }
   }
 
   async function reassignCaseToTpa() {
@@ -2420,6 +2496,16 @@ function App() {
                                   <button
                                     type="button"
                                     className="icon-button"
+                                    title="Move to TPA QC"
+                                    aria-label="Move to TPA QC"
+                                    onClick={() => moveCaseToTpaQc(item)}
+                                    disabled={actionSaving}
+                                  >
+                                    <CheckCircle2 size={15} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="icon-button"
                                     title="Remarks"
                                     aria-label="Remarks"
                                     onClick={() => openRemarkCase(item)}
@@ -2456,6 +2542,22 @@ function App() {
             )}
 
           </section>
+
+        ) : active === 'TPA QC' ? (
+
+          <TpaQcReport
+            caseItem={tpaQcCase}
+            form={tpaQcForm}
+            updateField={updateTpaQcField}
+            setForm={setTpaQcForm}
+            saving={tpaQcSaving}
+            message={tpaQcMessage}
+            onSave={() => saveTpaQcDraft(false)}
+            onSubmit={() => saveTpaQcDraft(true)}
+            onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)}
+            onReject={() => tpaQcCase && openRejectCase(tpaQcCase)}
+            onHistory={() => tpaQcCase && openHistory(tpaQcCase)}
+          />
 
         ) : (
 
@@ -3479,6 +3581,31 @@ function App() {
       </main>
     </div>
   )
+}
+
+function TpaQcReport({ caseItem, form, updateField, setForm, saving, message, onSave, onSubmit, onRemarks, onReject, onHistory }) {
+  const [page, setPage] = useState(1)
+  if (!caseItem) return <section className="panel empty"><Database /><h2>TPA QC</h2><p>Select an Assigned/Reassigned case from Reassign to start the inspection report.</p></section>
+  const pageStyle={background:'#fff',border:'1px solid #d7dce2',minHeight:980,padding:'28px 34px',marginBottom:18,boxShadow:'0 4px 14px rgba(15,23,42,.06)',fontFamily:'Arial,Helvetica,sans-serif',color:'#222'}
+  const header=<div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',borderBottom:'1px solid #ddd',paddingBottom:10,marginBottom:14}}><div style={{display:'flex',alignItems:'center',gap:10}}><div style={{width:34,height:34,borderRadius:'50%',background:'#ef4444',color:'#fff',display:'grid',placeItems:'center',fontWeight:800}}>CD</div><div><div style={{fontSize:20,fontWeight:800}}>CarDekho</div><div style={{fontSize:10,letterSpacing:1}}>INSPECTION</div></div></div><div style={{textAlign:'right'}}><b style={{fontSize:17}}>Vehicle Inspection Report</b><div style={{fontSize:11}}>Certificate No.: {caseItem.case_id}</div></div></div>
+  const input=(label,key,disabled=false)=><label style={{display:'block',fontSize:10,marginBottom:8}}><span style={{display:'block',fontWeight:700,marginBottom:3}}>{label}</span><input value={form[key]||''} disabled={disabled} onChange={e=>updateField(key,e.target.value)} style={{width:'100%',boxSizing:'border-box',padding:'6px 7px',border:'1px solid #d7dce2',borderRadius:2,fontSize:11,background:disabled?'#f7f7f7':'#fff'}} /></label>
+  const section=(letter,title,children)=><div style={{border:'1px solid #cfcfcf',marginTop:10}}><div style={{background:'#f7f7f7',padding:'7px 10px',fontWeight:800,fontSize:13}}>{letter&&<span style={{display:'inline-block',background:'#444',color:'#fff',padding:'2px 7px',marginRight:7}}>{letter}</span>}{title}</div><div style={{padding:10}}>{children}</div></div>
+  const score=(label,key)=><label style={{fontSize:10}}><span style={{display:'block',fontWeight:700}}>{label}</span><input value={form[key]||''} onChange={e=>updateField(key,e.target.value)} placeholder=" /10" style={{width:'80px',padding:'5px',border:'1px solid #d7dce2'}} /></label>
+  const media=['Profile Picture','Right View','Right Quarter Panel','Rear View','Left Quarter Panel','Left View','Left Side Profile Pic','Front View','Engine Compartment','Boot / Dicky','Front Windscreen','Windscreen - Interior ( from rear seat)','Odometer Reading','ABC Pedals ( from driver seat)','Selfie with Vehicle','Other Images','VinPlate Photo','Chassis Imprint','Chassis Number Pencil Tracing']
+  const ranges=page===3?[0,8]:page===4?[8,16]:[16,19]
+  return <div>
+    <div className="panel" style={{marginBottom:12,position:'sticky',top:0,zIndex:5}}><div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}><div><h2 style={{margin:0}}>TPA QC — Vehicle Inspection Report</h2><small>CASE-{caseItem.case_id} · {caseItem.registration_number||'Registration not available'} · Same PDF structure</small></div><div style={{display:'flex',gap:7,flexWrap:'wrap'}}><button className="primary" type="button" onClick={onSave} disabled={saving}><Save size={15}/> {saving?'Saving...':'Save Draft'}</button><button type="button" onClick={onRemarks}>Remarks</button><button type="button" onClick={onReject}>Reject</button><button type="button" onClick={onHistory}>History</button><button className="primary" type="button" onClick={onSubmit} disabled={saving}>Submit to QC</button></div></div>{message&&<div style={{marginTop:8,padding:8,background:'#f0fdf4',border:'1px solid #bbf7d0'}}>{message}</div>}</div>
+    <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>{[1,2,3,4,5,6,7,8].map(n=><button key={n} type="button" onClick={()=>setPage(n)} style={{background:page===n?'#ef4444':'#fff',color:page===n?'#fff':'#111',border:'1px solid #cbd5e1',padding:'5px 10px'}}>Page {n}</button>)}</div>
+    <div style={pageStyle}>{header}
+      {page===1&&<><div style={{fontSize:17,fontWeight:800,marginBottom:10}}>{[caseItem.make,caseItem.model,caseItem.variant].filter(Boolean).join(' ')||'Vehicle Inspection'}</div>{section('A','Vehicle Details',<div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>{input('Reg. No','registration_number')}{input('RTO','rto')}{input('Manufacturing Date','manufacturing_date')}{input('Registration Date','registration_date')}{input('No of Owners','owner_count')}{input('Odometer Reading','odometer')}{input('Fuel Type','fuel')}{input('Transmission','transmission')}{input('Color','color')}{input('Body Type','body_type')}{input('Engine Number','engine_number')}{input('Chassis Number','chassis_number')}{input('Loan No/Ref No','loan_number')}{input('RC Available','rc_available')}{input('Insurance Type','insurance_type')}{input('Third Party Insurance Validity','third_party_validity')}{input('Hypothecation','hypothecation')}{input('Financier','financier')}{input('CNG/LPG Fitment','cng_fitment')}{input('CNG/LPG Category','cng_category')}{input('Road Tax Validity','road_tax_validity')}{input('Road Tax Validity Date','road_tax_date')}{input('Customer Name','customer_name')}{input('Client Name','client_name')}{input('CNG Validity Date','cng_validity')}{input('Key Available','key_available')}{input('Inspection Type','inspection_type')}{input('Inspection Site','inspection_site')}</div>)}{section('B','Summary',<div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:8}}>{score('Overall Score','overall_score')}{score('Body and Frame','body_score')}{score('Exterior and Interior','exterior_score')}{score('Light','light_score')}{score('Tyre Details','tyre_score')}{score('Other Details','other_score')}</div>)}{section('C','Remarks / Condition',<div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:12}}><label style={{fontSize:10,fontWeight:700}}>Condition<select value={form.condition||''} onChange={e=>updateField('condition',e.target.value)} style={{display:'block',width:'100%',padding:7,marginTop:4}}><option value="">Select</option><option>Excellent</option><option>Good</option><option>Average</option><option>Poor</option></select></label>{input('Remarks','remarks')}</div>)}</>}
+      {page===2&&section('B','Detailed Inspection',<div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>{['Body and Frame','Exterior and Interior','Light','Tyre Details','Other Details'].map(group=><div key={group} style={{border:'1px solid #ddd',padding:10}}><b>{group}</b>{['Good','Scratched','Dented','Available','Not Available','Not Applicable'].map(v=><label key={v} style={{display:'block',fontSize:11,marginTop:7}}><input type="radio" name={group.replaceAll(' ','-')} /> {v}</label>)}</div>)}</div>)}
+      {(page===3||page===4||page===5)&&section('D','Inspection Photos',<div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:12}}>{media.slice(...ranges).map(name=><div key={name} style={{border:'1px dashed #bbb',minHeight:145,padding:10,textAlign:'center'}}><div style={{fontWeight:700,fontSize:11}}>{name}</div><div style={{height:95,display:'grid',placeItems:'center',background:'#f8fafc',margin:'8px 0'}}>No Image</div><label style={{fontSize:10,cursor:'pointer'}}><Upload size={13}/> Upload<input type="file" accept="image/*" style={{display:'none'}} /></label></div>)}</div>)}
+      {page===6&&section('', 'Disclaimer / Notes', <div style={{fontSize:11,lineHeight:1.6}}><p>This inspection summary report is compiled based on information provided to us including title documents, MMV, year, condition, odometer reading and external examination of the vehicle/components.</p><p>The report will not tell you about hidden defects or problems which cannot be identified by a visual inspection.</p><p>To check the genuinity of condition report please scan the QR code on 1st page of report.</p></div>)}
+      {page===7&&section('E','Vahan Details',<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',border:'1px solid #ddd'}}>{['Registration Number','Manufacturing Date','Registered RTO','Registration Date','Owner Name','RC Blacklist Status','Owner Count','Fitness Upto','Owner Permanent Address','Name of Financier','Owner Present Address','Insurer','Vehicle Name','Policy Number','Make','Insurance Valid Upto','Model','PUCC Number','Vehicle Category','PUCC Valid Upto','Vehicle Class','NP Issued By','Wheel Base','NP Number','Chassis Number','NP Valid Upto','Engine Number','Permit Issue Date','Car Color','Permit Number','Fuel Type','Permit Type','Fuel Norms','Permit Valid From','Engine Capacity','Permit Valid Upto','Gross Vehicle Weight','RC Tax Upto','Seating Capacity','Body Type','Sleeper Capacity'].map(k=><div key={k} style={{padding:8,borderBottom:'1px solid #eee',fontSize:10}}><b>{k}</b><div style={{marginTop:5,color:'#999'}}>— API value will be populated later —</div></div>)}</div>)}
+      {page===8&&section('F','Challan Details',<div style={{border:'1px solid #ddd'}}>{[1,2,3,4,5,6,7,8,9].map(n=><div key={n} style={{display:'grid',gridTemplateColumns:'50px 1fr 1fr 90px 90px',fontSize:10,padding:8,borderBottom:'1px solid #eee'}}><span>{n}</span><span>—</span><span>—</span><span>—</span><span>—</span></div>)}<p style={{fontSize:10,color:'#666'}}>Challan data intentionally blank until API integration.</p></div>)}
+      <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'#666',marginTop:18}}><span>Date of Inspection</span><span>Page: {page} of 8</span><span>CarDekho INSPECTION</span></div>
+    </div>
+  </div>
 }
 
 function Field({
