@@ -2704,7 +2704,7 @@ function App() {
         ) : active === 'Pricing' ? (
           <TpaQcReport mode="Pricing" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Pricing')} onSave={() => tpaQcCase && persistMasterInspectionReport(tpaQcCase, tpaQcForm, 'Pricing', true)} onSubmit={(meta) => tpaQcCase && pricingFinalSubmit(tpaQcCase, meta)} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
         ) : active === 'Report Generated' ? (
-          <TpaQcReport mode="Report Generated" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Report Generated')} onSave={() => tpaQcCase && persistMasterInspectionReport(tpaQcCase, tpaQcForm, 'Report Generated', true)} onSubmit={() => {}} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
+          <TpaQcReport mode="Report Generated" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Report Generated')} onSave={(valueOverride) => tpaQcCase && persistMasterInspectionReport(tpaQcCase, valueOverride || tpaQcForm, 'Report Generated', true)} onSubmit={() => {}} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
         ) : (
 
           <section className="panel empty">
@@ -3802,20 +3802,31 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
     return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : ''
   }
 
-  const loadExternalScript = src => new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[data-cd-pdf=\"${src}\"]`)
+  const loadExternalScript = (src, timeoutMs = 20000) => new Promise((resolve, reject) => {
+    const key = src.replace(/[^a-z0-9]/gi, '_')
+    const existing = document.querySelector(`script[data-cd-pdf=\"${key}\"]`)
+    if (existing?.dataset.loaded === 'true') return resolve()
+
+    const finish = (error) => {
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+
+    const timer = setTimeout(() => finish(new Error(`PDF library load timed out: ${src}`)), timeoutMs)
+
     if (existing) {
-      if (existing.dataset.loaded === 'true') return resolve()
-      existing.addEventListener('load', () => resolve(), { once: true })
-      existing.addEventListener('error', () => reject(new Error(`Unable to load ${src}`)), { once: true })
+      existing.addEventListener('load', () => { existing.dataset.loaded = 'true'; finish() }, { once: true })
+      existing.addEventListener('error', () => finish(new Error(`Unable to load ${src}`)), { once: true })
       return
     }
+
     const script = document.createElement('script')
     script.src = src
     script.async = true
-    script.dataset.cdPdf = src
-    script.onload = () => { script.dataset.loaded = 'true'; resolve() }
-    script.onerror = () => reject(new Error(`Unable to load ${src}`))
+    script.dataset.cdPdf = key
+    script.onload = () => { script.dataset.loaded = 'true'; finish() }
+    script.onerror = () => finish(new Error(`Unable to load ${src}`))
     document.head.appendChild(script)
   })
 
@@ -3839,77 +3850,123 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
   const generateInspectionPdf = async () => {
     if (!reportRef.current) throw new Error('Report is not ready for PDF generation.')
     setPdfGenerating(true)
-    setPdfMessage('Generating compressed PDF...')
+    setPdfMessage('Preparing PDF engine...')
     try {
-      await loadExternalScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
-      await loadExternalScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+      const html2canvasUrls = [
+        'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'
+      ]
+      const jspdfUrls = [
+        'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+      ]
+
+      let engineLoaded = false
+      let lastEngineError = null
+      for (const url of html2canvasUrls) {
+        try { await loadExternalScript(url); engineLoaded = true; break } catch (e) { lastEngineError = e }
+      }
+      if (!engineLoaded) throw new Error(`Unable to load PDF image engine. ${lastEngineError?.message || ''}`.trim())
+
+      engineLoaded = false
+      for (const url of jspdfUrls) {
+        try { await loadExternalScript(url); engineLoaded = true; break } catch (e) { lastEngineError = e }
+      }
+      if (!engineLoaded) throw new Error(`Unable to load PDF engine. ${lastEngineError?.message || ''}`.trim())
+
       const JsPdf = window.jspdf?.jsPDF
-      if (!JsPdf || !window.html2canvas) throw new Error('PDF engine could not be loaded.')
+      if (!JsPdf || !window.html2canvas) throw new Error('PDF engine could not be loaded in this browser.')
 
       const node = reportRef.current
       const attempts = [
-        { scale: 0.62, quality: 0.58 },
-        { scale: 0.50, quality: 0.48 },
-        { scale: 0.42, quality: 0.40 },
-        { scale: 0.35, quality: 0.34 },
-        { scale: 0.28, quality: 0.28 },
-        { scale: 0.22, quality: 0.22 }
+        { scale: 0.62 },
+        { scale: 0.50 },
+        { scale: 0.42 },
+        { scale: 0.35 },
+        { scale: 0.28 },
+        { scale: 0.22 }
       ]
       let finalBlob = null
       let finalDoc = null
 
       for (const attempt of attempts) {
+        setPdfMessage(`Rendering PDF (${Math.round(attempt.scale * 100)}% quality)...`)
         const doc = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true })
         await new Promise((resolve, reject) => {
-          doc.html(node, {
-            x: 5,
-            y: 5,
-            width: 200,
-            windowWidth: node.scrollWidth,
-            autoPaging: 'text',
-            margin: [5, 5, 5, 5],
-            html2canvas: {
-              scale: attempt.scale,
-              useCORS: true,
-              backgroundColor: '#ffffff',
-              imageTimeout: 0,
-              logging: false
-            },
-            callback: pdf => {
-              try {
-                const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl
-                if (videoUrl) {
-                  pdf.addPage()
-                  pdf.setFontSize(12)
-                  pdf.text('Exterior Inspection Video', 15, 20)
-                  pdf.setFontSize(10)
-                  pdf.setTextColor(30, 80, 180)
-                  pdf.textWithLink('▶ Play / Open Video', 15, 32, { url: videoUrl })
-                  pdf.setTextColor(0, 0, 0)
+          let settled = false
+          const timer = setTimeout(() => {
+            if (!settled) { settled = true; reject(new Error('PDF rendering timed out. Please try again or reduce/replace very large photos.')) }
+          }, 90000)
+
+          try {
+            doc.html(node, {
+              x: 5,
+              y: 5,
+              width: 200,
+              windowWidth: Math.max(node.scrollWidth || 1, 900),
+              autoPaging: 'text',
+              margin: [5, 5, 5, 5],
+              html2canvas: {
+                scale: attempt.scale,
+                useCORS: true,
+                allowTaint: false,
+                backgroundColor: '#ffffff',
+                imageTimeout: 20000,
+                logging: false,
+                removeContainer: true
+              },
+              callback: pdf => {
+                if (settled) return
+                try {
+                  const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl
+                  if (videoUrl) {
+                    pdf.addPage()
+                    pdf.setFontSize(12)
+                    pdf.setTextColor(0, 0, 0)
+                    pdf.text('Exterior Inspection Video', 15, 20)
+                    pdf.setFontSize(10)
+                    pdf.setTextColor(30, 80, 180)
+                    pdf.textWithLink('Play / Open Video', 15, 32, { url: videoUrl })
+                    pdf.setTextColor(0, 0, 0)
+                  }
+                  const blob = pdf.output('blob')
+                  if (!blob || !blob.size) throw new Error('Generated PDF is empty.')
+                  finalDoc = pdf
+                  finalBlob = blob
+                  settled = true
+                  clearTimeout(timer)
+                  resolve()
+                } catch (e) {
+                  settled = true
+                  clearTimeout(timer)
+                  reject(e)
                 }
-                finalDoc = pdf
-                const blob = pdf.output('blob')
-                finalBlob = blob
-                resolve()
-              } catch (e) { reject(e) }
-            }
-          })
+              }
+            })
+          } catch (e) {
+            settled = true
+            clearTimeout(timer)
+            reject(e)
+          }
         })
         if (finalBlob && finalBlob.size <= 2 * 1024 * 1024) break
       }
 
       if (!finalBlob || !finalDoc) throw new Error('Unable to generate PDF.')
-      if (finalBlob.size > 2 * 1024 * 1024) {
-        setPdfMessage(`PDF generated (${(finalBlob.size / 1024 / 1024).toFixed(2)} MB). Report generation will continue; replace very large photos if a smaller PDF is required.`)
-      }
 
       const path = `${caseItem.case_id}/${Date.now()}_inspection_report.pdf`
-      const upload = await supabase.storage.from('inspection-reports').upload(path, finalBlob, { contentType: 'application/pdf', upsert: true })
+      setPdfMessage('Uploading generated PDF to secure report storage...')
+      const upload = await supabase.storage
+        .from('inspection-reports')
+        .upload(path, finalBlob, { contentType: 'application/pdf', upsert: true })
       if (upload.error) throw new Error(`PDF upload failed: ${upload.error.message}`)
+
       const { data: publicData } = supabase.storage.from('inspection-reports').getPublicUrl(path)
       const pdfUrl = publicData?.publicUrl || ''
-      setPdfMessage(`PDF generated successfully (${(finalBlob.size / 1024).toFixed(0)} KB).`)
-      return { pdfUrl, pdfSize: finalBlob.size }
+      if (!pdfUrl) throw new Error('PDF was uploaded but a public report URL could not be created.')
+
+      setPdfMessage(`PDF generated successfully (${(finalBlob.size / 1024 / 1024).toFixed(2)} MB).`)
+      return { pdfUrl, pdfSize: finalBlob.size, pdfGeneratedAt: new Date().toISOString() }
     } finally {
       setPdfGenerating(false)
     }
@@ -4106,6 +4163,19 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                 {reportEditMode && <button className="primary" type="button" onClick={async () => { await onSave(); setReportEditMode(false); setPdfMessage('Report changes saved successfully.') }} disabled={saving}>
                   {saving ? 'Saving...' : 'Save Changes'}
                 </button>}
+                <button type="button" className="primary" onClick={async () => {
+                  try {
+                    const meta = await generateInspectionPdf()
+                    const nextForm = { ...form, pdf_url: meta.pdfUrl, pdf_size: meta.pdfSize, pdf_generated_at: meta.pdfGeneratedAt }
+                    setForm(nextForm)
+                    await onSave(nextForm)
+                    setPdfMessage('PDF generated, uploaded and report data saved successfully.')
+                  } catch (e) {
+                    setPdfMessage(e?.message || 'Unable to generate PDF.')
+                  }
+                }} disabled={saving || pdfGenerating}>
+                  {pdfGenerating ? 'Generating PDF...' : (form.pdf_url ? 'Regenerate PDF' : 'Generate PDF')}
+                </button>
                 {form.pdf_url && (
                   <>
                     <a href={form.pdf_url} download={`CarDekho_${caseItem.case_id}_Inspection_Report.pdf`} style={{ display: 'inline-flex', alignItems: 'center', padding: '7px 10px', border: '1px solid #16a34a', background: '#f0fdf4', color: '#15803d', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Download PDF</a>
