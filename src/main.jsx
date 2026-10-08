@@ -1139,7 +1139,7 @@ function App() {
       insurance_expiry: item?.insurance_expiry || '', third_party_validity: item?.third_party_validity || '', hypothecation: item?.hypothecation || '', financier: item?.financier || '',
       cng_fitment: item?.cng_fitment || '', cng_category: item?.cng_category || '', road_tax_validity: item?.road_tax_validity || '', road_tax_date: item?.road_tax_date || '',
       customer_name: item?.customer_name || '', proposer_name: item?.proposer_name || '', client_name: item?.client_name || item?.client || '', cng_validity: item?.cng_validity || '',
-      key_available: item?.key_available || '', inspection_type: item?.inspection_type || 'Physical Inspection', inspection_site: item?.city || '', remarks: '',
+      key_available: item?.key_available || '', inspection_type: item?.inspection_type || 'Physical Inspection', inspection_site: item?.city || '', remarks: item?.remarks || '',
       overall_score: '', body_score: '', exterior_score: '', light_score: '', tyre_score: '', other_score: '', condition: '', detailed: {}, media: {}, exteriorVideo: null, valuation_price: '', pricing_remarks: '', pdf_url: '', pdf_size: '', pdf_generated_at: ''
     }
   }
@@ -1249,7 +1249,7 @@ function App() {
       await persistMasterInspectionReport(item, finalForm, 'Pricing', true)
       const { error } = await supabase.from('cases').update({ status: 'COMPLETED' }).eq('id', item.id).eq('status', 'PRICING')
       if (error) throw new Error(error.message)
-      await supabase.from('audit_trail').insert({ case_id: item.case_id, action: 'Final Submitted / Report Generated', stage: 'Pricing', old_status: 'PRICING', new_status: 'COMPLETED', user_id: null, user_name: 'SS Sundar Singh', role: 'Admin' })
+      await supabase.from('audit_trail').insert({ case_id: item.case_id, action: 'Final Submitted / Report Generated', stage: 'Pricing', old_status: 'PRICING', new_status: 'COMPLETED', remarks: 'Pricing final submitted and PDF generated.', user_id: null, user_name: 'SS Sundar Singh', role: 'Admin' })
       await loadCases(); setTpaQcCase({ ...item, status: 'COMPLETED' }); setActive('Report Generated')
     } catch (error) { setActionError(error?.message || 'Unable to generate final report.') }
     finally { setActionSaving(false) }
@@ -3738,7 +3738,12 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
   if (!caseItem) {
     const normalize = value => String(value || '').trim().toUpperCase().replace(/-/g, '_').replace(/\s+/g, '_')
     const statusMap = { 'TPA QC': 'PRE_QC', 'QC': 'QC', 'QC Hold': 'QC_HOLD', 'Pricing': 'PRICING', 'Report Generated': 'COMPLETED' }
-    const tpaQcCases = cases.filter(item => normalize(item.status) === (statusMap[mode] || 'PRE_QC'))
+    const tpaQcCases = cases.filter(item => {
+      const status = normalize(item.status)
+      return mode === 'Report Generated'
+        ? ['COMPLETED', 'REPORT_GENERATED'].includes(status)
+        : status === (statusMap[mode] || 'PRE_QC')
+    })
 
     return (
       <section className="panel" style={{ padding: 18 }}>
@@ -3893,7 +3898,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
 
       if (!finalBlob || !finalDoc) throw new Error('Unable to generate PDF.')
       if (finalBlob.size > 2 * 1024 * 1024) {
-        throw new Error('PDF is still above 2MB after compression. Reduce/replace very large photos and generate again.')
+        setPdfMessage(`PDF generated (${(finalBlob.size / 1024 / 1024).toFixed(2)} MB). Report generation will continue; replace very large photos if a smaller PDF is required.`)
       }
 
       const path = `${caseItem.case_id}/${Date.now()}_inspection_report.pdf`
@@ -4158,6 +4163,21 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                     <div style={{ height: 24, border: '1px solid #aaa', background: '#f7f7f7', display: 'grid', placeItems: 'center', fontSize: 10, fontWeight: 800 }}>
                       {condition || '—'}
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {section('', 'Remarks',
+                <div style={{ padding: 8 }}>
+                  <textarea
+                    value={form.remarks || ''}
+                    onChange={e => updateField('remarks', e.target.value)}
+                    placeholder="Enter inspection remarks..."
+                    rows={4}
+                    style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', border: '1px solid #aaa', borderRadius: 0, padding: 8, fontFamily: 'inherit', fontSize: 10, lineHeight: 1.45, background: '#fff' }}
+                  />
+                  <div style={{ marginTop: 4, fontSize: 8.5, color: '#777' }}>
+                    Remarks are autosaved and remain part of the master inspection report.
                   </div>
                 </div>
               )}
