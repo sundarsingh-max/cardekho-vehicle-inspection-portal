@@ -1088,7 +1088,7 @@ function App() {
       const { error: updateError } = await supabase
         .from('cases')
         .update({
-          status: 'ASSIGNED',
+          status: 'REASSIGNED',
           assigned_tpa_id: tpa.id,
           assigned_tpa_name: tpa.name
         })
@@ -1110,7 +1110,7 @@ function App() {
 
       if (
         !verifiedCase ||
-        verifiedCase.status !== 'ASSIGNED' ||
+        verifiedCase.status !== 'REASSIGNED' ||
         String(verifiedCase.assigned_tpa_id || '') !== String(tpa.id)
       ) {
         throw new Error(
@@ -1143,7 +1143,7 @@ function App() {
           action: 'Reassigned',
           stage: 'ASSIGN',
           old_status: reassignCase.status || 'ASSIGNED',
-          new_status: 'ASSIGNED',
+          new_status: 'REASSIGNED',
           reason,
           remarks: remarks || null,
           user_id: null,
@@ -2307,7 +2307,174 @@ function App() {
               </>
             )}
 
+          </sec
+        ) : active === 'Reassign' ? (
+
+          <section className="panel">
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+                marginBottom: 16
+              }}
+            >
+              <div>
+                <h2 style={{ marginBottom: 4 }}>Reassign Cases</h2>
+                <p style={{ margin: 0 }}>
+                  Assigned and reassigned cases. Select a different active TPA to transfer the case.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="primary"
+                onClick={loadCases}
+                disabled={loading}
+              >
+                <RefreshCw size={16} />
+                {loading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+
+            {dbError && (
+              <div
+                className="panel"
+                style={{
+                  marginBottom: 16,
+                  border: '1px solid #fecaca',
+                  background: '#fff1f2'
+                }}
+              >
+                <strong>Database connection error</strong>
+                <p>{dbError}</p>
+              </div>
+            )}
+
+            {loading ? (
+              <p>Loading cases from Supabase...</p>
+            ) : (
+              <>
+                <h3 style={{ marginBottom: 10 }}>Cases Available for Reassignment</h3>
+
+                {cases.filter(item => {
+                  const status = String(item.status || '').trim().toUpperCase()
+                  return status === 'ASSIGNED' || status === 'REASSIGNED'
+                }).length === 0 ? (
+                  <div
+                    style={{
+                      padding: 28,
+                      textAlign: 'center',
+                      border: '1px dashed #cbd5e1',
+                      borderRadius: 12
+                    }}
+                  >
+                    <Database size={38} />
+                    <h3>No Assigned Cases Found</h3>
+                    <p>
+                      Assign a case first. Assigned cases will appear here automatically.
+                    </p>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Lead ID</th>
+                          <th>Customer</th>
+                          <th>Registration No.</th>
+                          <th>Vehicle</th>
+                          <th>Current TPA</th>
+                          <th>Status</th>
+                          <th>Date</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cases
+                          .filter(item => {
+                            const status = String(item.status || '').trim().toUpperCase()
+                            return status === 'ASSIGNED' || status === 'REASSIGNED'
+                          })
+                          .map(item => (
+                            <tr key={item.id}>
+                              <td><strong>CASE-{item.case_id}</strong></td>
+                              <td>{item.customer_name || '—'}</td>
+                              <td>{item.registration_number || '—'}</td>
+                              <td>
+                                {[item.make, item.model, item.variant]
+                                  .filter(Boolean)
+                                  .join(' ') || '—'}
+                              </td>
+                              <td>{item.assigned_tpa_name || '—'}</td>
+                              <td>
+                                <span className="status">
+                                  {displayStatus(item.status)}
+                                </span>
+                              </td>
+                              <td>{formatDate(item.created_at)}</td>
+                              <td>
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    gap: 6,
+                                    flexWrap: 'wrap'
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    title="Reassign"
+                                    aria-label="Reassign"
+                                    onClick={() => openReassignCase(item)}
+                                  >
+                                    <RefreshCw size={15} />
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    title="Remarks"
+                                    aria-label="Remarks"
+                                    onClick={() => openRemarkCase(item)}
+                                  >
+                                    <MessageSquare size={15} />
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    title="History"
+                                    aria-label="History"
+                                    onClick={() => openHistory(item)}
+                                  >
+                                    <History size={15} />
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    title="Reject"
+                                    aria-label="Reject"
+                                    onClick={() => openRejectCase(item)}
+                                  >
+                                    <X size={15} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+
           </section>
+tion>
 
         ) : (
 
