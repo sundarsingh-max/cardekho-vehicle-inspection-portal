@@ -50,6 +50,8 @@ function App() {
 
   const [form, setForm] = useState({
     loan_number: '',
+    bank_executive_name: '',
+    bank_executive_mobile: '',
     customer_name: '',
     mobile_phone: '',
     registration_number: '',
@@ -195,52 +197,64 @@ function App() {
       .slice(0, 20)
   }, [cases, search])
 
-  const segments = useMemo(() => {
-    return uniqueValues(
-      mmv.map(row =>
+  const segments = [
+    'CAR',
+    'CV',
+    'FE',
+    '3WLR',
+    '2WLR',
+    'CE'
+  ]
+
+  const mmvHasSegment = useMemo(() => {
+    return mmv.some(row =>
+      String(
         firstValue(row, [
           'segment',
           'Segment',
-          'vehicle_segment'
-        ])
-      )
+          'SEGMENT',
+          'vehicle_segment',
+          'VEHICLE_SEGMENT'
+        ]) || ''
+      ).trim() !== ''
     )
   }, [mmv])
 
+  const mmvRowsForSelection = useMemo(() => {
+    return mmv.filter(row => {
+      const rowSegment = firstValue(row, [
+        'segment',
+        'Segment',
+        'SEGMENT',
+        'vehicle_segment',
+        'VEHICLE_SEGMENT'
+      ])
+
+      if (!form.segment || !mmvHasSegment) return true
+
+      return (
+        String(rowSegment || '').trim().toUpperCase() ===
+        String(form.segment).trim().toUpperCase()
+      )
+    })
+  }, [mmv, mmvHasSegment, form.segment])
+
   const makes = useMemo(() => {
     return uniqueValues(
-      mmv
-        .filter(row => {
-          const rowSegment = firstValue(row, [
-            'segment',
-            'Segment',
-            'vehicle_segment'
-          ])
-
-          return !form.segment ||
-            String(rowSegment || '').trim() ===
-              String(form.segment).trim()
-        })
-        .map(row =>
-          firstValue(row, [
-            'make',
-            'MAKE',
-            'Make'
-          ])
-        )
+      mmvRowsForSelection.map(row =>
+        firstValue(row, [
+          'make',
+          'MAKE',
+          'Make'
+        ])
+      )
     )
-  }, [mmv, form.segment])
+  }, [mmvRowsForSelection])
 
   const models = useMemo(() => {
     return uniqueValues(
-      mmv
+      mmvRowsForSelection
         .filter(row => {
-          const rowSegment = firstValue(row, [
-            'segment',
-            'Segment',
-            'vehicle_segment'
-          ])
-
           const rowMake = firstValue(row, [
             'make',
             'MAKE',
@@ -248,12 +262,9 @@ function App() {
           ])
 
           return (
-            (!form.segment ||
-              String(rowSegment || '').trim() ===
-                String(form.segment).trim()) &&
-            (!form.make ||
-              String(rowMake || '').trim() ===
-                String(form.make).trim())
+            !form.make ||
+            String(rowMake || '').trim().toUpperCase() ===
+              String(form.make).trim().toUpperCase()
           )
         })
         .map(row =>
@@ -264,18 +275,12 @@ function App() {
           ])
         )
     )
-  }, [mmv, form.segment, form.make])
+  }, [mmvRowsForSelection, form.make])
 
   const variants = useMemo(() => {
     return uniqueValues(
-      mmv
+      mmvRowsForSelection
         .filter(row => {
-          const rowSegment = firstValue(row, [
-            'segment',
-            'Segment',
-            'vehicle_segment'
-          ])
-
           const rowMake = firstValue(row, [
             'make',
             'MAKE',
@@ -289,15 +294,12 @@ function App() {
           ])
 
           return (
-            (!form.segment ||
-              String(rowSegment || '').trim() ===
-                String(form.segment).trim()) &&
             (!form.make ||
-              String(rowMake || '').trim() ===
-                String(form.make).trim()) &&
+              String(rowMake || '').trim().toUpperCase() ===
+                String(form.make).trim().toUpperCase()) &&
             (!form.model ||
-              String(rowModel || '').trim() ===
-                String(form.model).trim())
+              String(rowModel || '').trim().toUpperCase() ===
+                String(form.model).trim().toUpperCase())
           )
         })
         .map(row =>
@@ -308,31 +310,18 @@ function App() {
           ])
         )
     )
-  }, [
-    mmv,
-    form.segment,
-    form.make,
-    form.model
-  ])
+  }, [mmvRowsForSelection, form.make, form.model])
 
   const years = useMemo(() => {
-    const values = mmv
-      .map(row =>
-        firstValue(row, [
-          'mfg_year',
-          'MFG_YEAR',
-          'year',
-          'YEAR',
-          'manufacturing_year'
-        ])
-      )
-      .filter(Boolean)
-      .map(value => String(value))
+    const currentYear = new Date().getFullYear()
+    const result = []
 
-    return uniqueValues(values).sort(
-      (a, b) => Number(b) - Number(a)
-    )
-  }, [mmv])
+    for (let year = currentYear; year >= 2000; year--) {
+      result.push(String(year))
+    }
+
+    return result
+  }, [])
 
   const zones = useMemo(() => {
     return uniqueValues(
@@ -535,6 +524,8 @@ function App() {
 
   function validateLead() {
     const required = [
+      ['bank_executive_name', 'Bank Executive Name'],
+      ['bank_executive_mobile', 'Bank Executive Mobile Number'],
       ['customer_name', 'Customer Name'],
       ['mobile_phone', 'Mobile Number'],
       ['registration_number', 'Registration Number'],
@@ -561,6 +552,14 @@ function App() {
 
     if (mobile.length !== 10) {
       return 'Mobile Number must be 10 digits.'
+    }
+
+    const bankExecutiveMobile = String(
+      form.bank_executive_mobile || ''
+    ).replace(/\D/g, '')
+
+    if (bankExecutiveMobile.length !== 10) {
+      return 'Bank Executive Mobile Number must be 10 digits.'
     }
 
     return ''
@@ -614,6 +613,10 @@ function App() {
         case_id: nextCaseId,
         loan_number:
           form.loan_number.trim() || null,
+        bank_executive_name:
+          form.bank_executive_name.trim(),
+        bank_executive_mobile:
+          form.bank_executive_mobile.trim(),
         customer_name:
           form.customer_name.trim(),
         mobile_phone:
@@ -658,6 +661,8 @@ function App() {
 
       setForm({
         loan_number: '',
+        bank_executive_name: '',
+        bank_executive_mobile: '',
         customer_name: '',
         mobile_phone: '',
         registration_number: '',
@@ -1269,6 +1274,39 @@ function App() {
                     )
                   }
                   placeholder="Enter loan number"
+                />
+
+                <Field
+                  label="Bank Executive Name"
+                  value={
+                    form.bank_executive_name
+                  }
+                  onChange={value =>
+                    updateForm(
+                      'bank_executive_name',
+                      value
+                    )
+                  }
+                  placeholder="Enter bank executive name"
+                  required
+                />
+
+                <Field
+                  label="Bank Executive Mobile Number"
+                  value={
+                    form.bank_executive_mobile
+                  }
+                  onChange={value =>
+                    updateForm(
+                      'bank_executive_mobile',
+                      value.replace(
+                        /\D/g,
+                        ''
+                      ).slice(0, 10)
+                    )
+                  }
+                  placeholder="10 digit mobile number"
+                  required
                 />
 
                 <Field
