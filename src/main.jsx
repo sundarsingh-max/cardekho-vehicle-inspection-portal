@@ -3755,15 +3755,15 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
             <p style={{ margin: '5px 0 0', color: '#64748b' }}>Open the same master inspection report. Data saved in the previous stage remains available.</p>
           </div>
           <span style={{ padding: '6px 10px', borderRadius: 999, background: '#E0F2F1', color: '#0f766e', fontWeight: 700, fontSize: 12 }}>
-            {tpaQcCases.length} Pending
+            {tpaQcCases.length} {mode === 'Report Generated' ? 'Generated' : 'Pending'}
           </span>
         </div>
 
         {tpaQcCases.length === 0 ? (
           <div className="panel empty" style={{ marginTop: 10 }}>
             <Database />
-            <h3>No TPA QC cases</h3>
-            <p>Move a case from Assign/Reassign using the TPA QC action.</p>
+            <h3>No {mode} cases</h3>
+            <p>{mode === 'Report Generated' ? 'Completed reports will appear here after Pricing final submission.' : 'Move a case to this stage using the permitted workflow action.'}</p>
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -3783,7 +3783,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                     <td style={{ padding: '11px 8px' }}>{item.registration_number || '—'}</td>
                     <td style={{ padding: '11px 8px' }}>{[item.make, item.model, item.variant].filter(Boolean).join(' ') || '—'}</td>
                     <td style={{ padding: '11px 8px' }}>{item.assigned_tpa_name || '—'}</td>
-                    <td style={{ padding: '11px 8px' }}><span style={{ padding: '4px 8px', borderRadius: 999, background: '#E0F2F1', color: '#0f766e', fontSize: 11, fontWeight: 700 }}>TPA QC</span></td>
+                    <td style={{ padding: '11px 8px' }}><span style={{ padding: '4px 8px', borderRadius: 999, background: mode === 'Report Generated' ? '#DCFCE7' : '#E0F2F1', color: mode === 'Report Generated' ? '#166534' : '#0f766e', fontSize: 11, fontWeight: 700 }}>{mode === 'Report Generated' ? 'REPORT GENERATED' : mode}</span></td>
                     <td style={{ padding: '11px 8px' }}>
                       <button type="button" className="primary" onClick={() => onOpenCase(item)}>Open {mode}</button>
                     </td>
