@@ -130,17 +130,35 @@ function App() {
   }
 
   async function loadTpas() {
+    // Use ONLY the existing public.tpa_master table.
+    // The Assign dropdown and TPA Master screen share this same data source.
     const { data, error } = await supabase
       .from('tpa_master')
       .select('*')
+      .eq('is_active', true)
       .order('name', { ascending: true })
+      .limit(1000)
 
     if (error) {
       console.error('TPA master error:', error)
       setTpas([])
-    } else {
-      setTpas(data || [])
+      setActionError(
+        `Unable to load active TPA master: ${error.message}`
+      )
+      return
     }
+
+    // Keep only active records even if the database returns a non-boolean
+    // representation of is_active.
+    const activeTpas = (data || []).filter(
+      tpa =>
+        tpa.is_active === true ||
+        String(tpa.is_active).toLowerCase() === 'true' ||
+        tpa.is_active === 1 ||
+        String(tpa.is_active) === '1'
+    )
+
+    setTpas(activeTpas)
   }
 
   function resetTpaForm() {
@@ -2427,13 +2445,11 @@ function App() {
                   required
                 >
                   <option value="">Select TPA</option>
-                  {tpas
-                    .filter(tpa => tpa.is_active)
-                    .map(tpa => (
-                      <option key={tpa.id} value={tpa.id}>
-                        {tpa.name} — {tpa.mobile}
-                      </option>
-                    ))}
+                  {tpas.map(tpa => (
+                    <option key={tpa.id} value={tpa.id}>
+                      {tpa.name} — {tpa.mobile || 'No mobile'}
+                    </option>
+                  ))}
                 </select>
               </label>
 
@@ -2465,7 +2481,7 @@ function App() {
               </label>
             </div>
 
-            {tpas.filter(tpa => tpa.is_active).length === 0 && (
+            {tpas.length === 0 && (
               <div
                 className="panel"
                 style={{
