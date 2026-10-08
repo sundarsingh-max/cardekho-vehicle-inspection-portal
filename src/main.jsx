@@ -3606,11 +3606,54 @@ function TpaQcReport({ caseItem, form, updateField, setForm, saving, message, on
     </label>
   )
 
-  const scoreField = (label, key) => (
-    <label style={{ display: 'grid', gridTemplateColumns: '1fr 58px', alignItems: 'center', gap: 5, fontSize: 10 }}>
+  const ratingOptions = ['Good', 'Scratched', 'Dented', 'Ok', 'Available', 'Not Available', 'Not Applicable']
+
+  // Inspection rating -> score. "Not Applicable" is excluded from averages.
+  const ratingToScore = {
+    Good: 10,
+    Ok: 10,
+    Available: 10,
+    Scratched: 7,
+    Dented: 5,
+    'Not Available': 0
+  }
+
+  const getGroupScore = (rows) => {
+    const values = rows
+      .map(row => form.detailed?.[row])
+      .filter(value => value && value !== 'Not Applicable' && Object.prototype.hasOwnProperty.call(ratingToScore, value))
+
+    if (!values.length) return ''
+    const total = values.reduce((sum, value) => sum + ratingToScore[value], 0)
+    return Number((total / values.length).toFixed(1))
+  }
+
+  const getOverallScore = () => {
+    const allRows = parameterGroups.flatMap(group => group.rows)
+    const values = allRows
+      .map(row => form.detailed?.[row])
+      .filter(value => value && value !== 'Not Applicable' && Object.prototype.hasOwnProperty.call(ratingToScore, value))
+
+    if (!values.length) return ''
+    const total = values.reduce((sum, value) => sum + ratingToScore[value], 0)
+    return Number((total / values.length).toFixed(1))
+  }
+
+  const getCondition = score => {
+    if (score === '' || score === null || score === undefined) return ''
+    if (score >= 9) return 'Excellent'
+    if (score >= 7) return 'Good'
+    if (score >= 5) return 'Average'
+    return 'Poor'
+  }
+
+  const scoreField = (label, value) => (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 58px', alignItems: 'center', gap: 5, fontSize: 10 }}>
       <span style={{ fontWeight: 700 }}>{label}</span>
-      <input value={form[key] || ''} onChange={e => updateField(key, e.target.value)} placeholder="/10" style={{ width: '100%', height: 24, boxSizing: 'border-box', padding: '2px 5px', border: '1px solid #aaa', borderRadius: 0, fontSize: 10 }} />
-    </label>
+      <div style={{ width: '100%', height: 24, boxSizing: 'border-box', padding: '4px 5px', border: '1px solid #aaa', background: '#f7f7f7', fontSize: 10, fontWeight: 800, textAlign: 'center' }}>
+        {value === '' ? '—' : `${value}/10`}
+      </div>
+    </div>
   )
 
   const section = (letter, title, children) => (
@@ -3734,37 +3777,85 @@ function TpaQcReport({ caseItem, form, updateField, setForm, saving, message, on
           </div>
         )}
 
-        {section('B', 'Summary / Score',
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-            {scoreField('Overall Score', 'overall_score')}
-            {scoreField('Body and Frame', 'body_score')}
-            {scoreField('Exterior and Interior', 'exterior_score')}
-            {scoreField('Light', 'light_score')}
-            {scoreField('Tyre Details', 'tyre_score')}
-            {scoreField('Other Details', 'other_score')}
-            <label style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', alignItems: 'center', gap: 5, fontSize: 10 }}><span style={{ fontWeight: 700 }}>Condition</span><select value={form.condition || ''} onChange={e => updateField('condition', e.target.value)} style={{ height: 24, border: '1px solid #aaa', borderRadius: 0, fontSize: 10 }}><option value="">Select</option><option>Excellent</option><option>Good</option><option>Average</option><option>Poor</option></select></label>
-          </div>
-        )}
+        {(() => {
+          const overallScore = getOverallScore()
+          const groupScoreMap = Object.fromEntries(parameterGroups.map(group => [group.title, getGroupScore(group.rows)]))
+          const condition = getCondition(overallScore)
 
-        {section('C', 'Detailed Inspection',
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
-            {parameterGroups.map(group => (
-              <div key={group.title} style={{ border: '1px solid #cfcfcf' }}>
-                <div style={{ background: '#f3f3f3', borderBottom: '1px solid #cfcfcf', padding: '6px 8px', fontWeight: 800, fontSize: 11 }}>{group.title}</div>
-                <div style={{ padding: 7 }}>
-                  {group.rows.map(row => (
-                    <div key={row} style={{ display: 'grid', gridTemplateColumns: '1fr 125px', gap: 7, alignItems: 'center', borderBottom: '1px solid #ededed', minHeight: 25, fontSize: 9.5 }}>
-                      <span>{row}</span>
-                      <select value={form.detailed?.[row] || ''} onChange={e => setForm(prev => ({ ...prev, detailed: { ...(prev.detailed || {}), [row]: e.target.value } }))} style={{ height: 22, border: '1px solid #aaa', borderRadius: 0, fontSize: 9.5 }}>
-                        <option value="">Select</option><option>Good</option><option>Scratched</option><option>Dented</option><option>Ok</option><option>Available</option><option>Not Available</option><option>Not Applicable</option>
-                      </select>
+          return (
+            <>
+              {section('B', 'Summary / Score',
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                  {scoreField('Overall Score', overallScore)}
+                  {scoreField('Body and Frame', groupScoreMap['Body & Frame'])}
+                  {scoreField('Exterior and Interior', groupScoreMap['Exterior & Interior'])}
+                  {scoreField('Light', groupScoreMap['Light'])}
+                  {scoreField('Tyre Details', groupScoreMap['Tyre Details'])}
+                  {scoreField('Other Details', groupScoreMap['Other Details'])}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', alignItems: 'center', gap: 5, fontSize: 10 }}>
+                    <span style={{ fontWeight: 700 }}>Condition</span>
+                    <div style={{ height: 24, border: '1px solid #aaa', background: '#f7f7f7', display: 'grid', placeItems: 'center', fontSize: 10, fontWeight: 800 }}>
+                      {condition || '—'}
                     </div>
-                  ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              )}
+
+              {section('C', 'Detailed Inspection',
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+                  {parameterGroups.map(group => {
+                    const currentValues = group.rows.map(row => form.detailed?.[row] || '')
+                    const allSame = currentValues.length > 0 && currentValues.every(value => value && value === currentValues[0])
+                    const bulkValue = allSame ? currentValues[0] : ''
+
+                    const applyGroupRating = value => {
+                      setForm(prev => ({
+                        ...prev,
+                        detailed: {
+                          ...(prev.detailed || {}),
+                          ...Object.fromEntries(group.rows.map(row => [row, value]))
+                        }
+                      }))
+                    }
+
+                    return (
+                      <div key={group.title} style={{ border: '1px solid #cfcfcf' }}>
+                        <div style={{ background: '#f3f3f3', borderBottom: '1px solid #cfcfcf', padding: '5px 8px', fontWeight: 800, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                          <span>{group.title}</span>
+                          <select
+                            value={bulkValue}
+                            onChange={e => applyGroupRating(e.target.value)}
+                            style={{ width: 125, height: 23, border: '1px solid #999', borderRadius: 0, fontSize: 9.5, background: '#fff' }}
+                            title={`Apply one rating to all ${group.title} parameters`}
+                          >
+                            <option value="">Select</option>
+                            {ratingOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                          </select>
+                        </div>
+
+                        <div style={{ padding: 7 }}>
+                          {group.rows.map(row => (
+                            <div key={row} style={{ display: 'grid', gridTemplateColumns: '1fr 125px', gap: 7, alignItems: 'center', borderBottom: '1px solid #ededed', minHeight: 25, fontSize: 9.5 }}>
+                              <span>{row}</span>
+                              <select
+                                value={form.detailed?.[row] || ''}
+                                onChange={e => setForm(prev => ({ ...prev, detailed: { ...(prev.detailed || {}), [row]: e.target.value } }))}
+                                style={{ height: 22, border: '1px solid #aaa', borderRadius: 0, fontSize: 9.5 }}
+                              >
+                                <option value="">Select</option>
+                                {ratingOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )
+        })()}
 
         {section('D', 'Inspection Photos / Media',
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
