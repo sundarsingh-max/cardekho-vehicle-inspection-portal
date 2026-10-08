@@ -237,7 +237,13 @@ function App() {
 
       if (!tpa) throw new Error('Selected TPA is not available.')
 
-      const { data: updatedCase, error: caseError } = await supabase
+      // Do not use .single() here. Supabase can return
+      // "Cannot coerce the result to a single JSON object" when the
+      // UPDATE returns zero rows (for example because an RLS policy
+      // prevents the updated row from being returned).
+      // Read the result as an array and explicitly verify that the
+      // selected OPEN case was updated.
+      const { data: updatedCases, error: caseError } = await supabase
         .from('cases')
         .update({
           status: 'ASSIGNED',
@@ -246,10 +252,15 @@ function App() {
         })
         .eq('id', assignCase.id)
         .eq('status', 'OPEN')
-        .select()
-        .single()
+        .select('id, case_id, status, assigned_tpa_id, assigned_tpa_name')
 
       if (caseError) throw new Error(caseError.message)
+
+      if (!updatedCases || updatedCases.length !== 1) {
+        throw new Error(
+          'Case was not assigned. The case may no longer be OPEN, or Supabase permissions/RLS are blocking the update.'
+        )
+      }
 
       const { error: historyError } = await supabase
         .from('assignment_history')
