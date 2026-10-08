@@ -262,13 +262,18 @@ function App() {
         )
       }
 
+      // The current app does not have a Supabase Auth user row yet.
+      // Therefore UUID columns must remain NULL; display identity is stored
+      // in the corresponding text columns instead of sending a name into UUID.
       const { error: historyError } = await supabase
         .from('assignment_history')
         .insert({
           case_id: assignCase.case_id,
           old_tpa: null,
           new_tpa: tpa.name,
-          assigned_by: 'SS Sundar Singh',
+          assigned_by: null,
+          assigned_by_name: 'SS Sundar Singh',
+          assigned_by_role: 'Admin',
           role: 'Admin',
           reason: assignReason.trim() || null,
           remarks: assignRemarks.trim() || null
@@ -280,6 +285,9 @@ function App() {
         .from('audit_trail')
         .insert({
           case_id: assignCase.case_id,
+          user_id: null,
+          user_name: 'SS Sundar Singh',
+          role: 'Admin',
           action: 'Assigned',
           stage: 'OPEN',
           old_status: 'OPEN',
