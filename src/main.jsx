@@ -127,21 +127,35 @@ function App() {
     setLoading(true)
     setDbError('')
 
-    const { data, error } = await supabase
-      .from('cases')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(1000)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 12000)
 
-    if (error) {
-      console.error('Supabase cases error:', error)
-      setDbError(error.message)
+    try {
+      const { data, error } = await supabase
+        .from('cases')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1000)
+        .abortSignal(controller.signal)
+
+      if (error) {
+        console.error('Supabase cases error:', error)
+        setDbError(error.message || 'Unable to load cases from Supabase.')
+        setCases([])
+      } else {
+        setCases(data || [])
+      }
+    } catch (error) {
+      console.error('Supabase cases request failed:', error)
+      const message = error?.name === 'AbortError'
+        ? 'Supabase connection timed out after 12 seconds. Please click Refresh and try again.'
+        : (error?.message || 'Unable to load cases from Supabase.')
+      setDbError(message)
       setCases([])
-    } else {
-      setCases(data || [])
+    } finally {
+      clearTimeout(timeoutId)
+      setLoading(false)
     }
-
-    setLoading(false)
   }
 
   async function loadTpas() {
@@ -1075,7 +1089,7 @@ function App() {
       loan_number: item?.loan_number || '', rc_available: item?.rc_available || '', insurance_type: item?.insurance_type || '', insurance_validity: item?.insurance_validity || '',
       insurance_expiry: item?.insurance_expiry || '', third_party_validity: item?.third_party_validity || '', hypothecation: item?.hypothecation || '', financier: item?.financier || '',
       cng_fitment: item?.cng_fitment || '', cng_category: item?.cng_category || '', road_tax_validity: item?.road_tax_validity || '', road_tax_date: item?.road_tax_date || '',
-      customer_name: item?.customer_name || '', proposer_name: item?.proposer_name || '', client_name: item?.client_name || '', cng_validity: item?.cng_validity || '',
+      customer_name: item?.customer_name || '', proposer_name: item?.proposer_name || '', client_name: item?.client_name || item?.client || '', cng_validity: item?.cng_validity || '',
       key_available: item?.key_available || '', inspection_type: item?.inspection_type || 'Physical Inspection', inspection_site: item?.city || '', remarks: '',
       overall_score: '', body_score: '', exterior_score: '', light_score: '', tyre_score: '', other_score: '', condition: '', detailed: {}, media: {}
     }
@@ -1335,21 +1349,28 @@ function App() {
     setActionError('')
 
     try {
-      const { error } = await supabase
-        .from('audit_trail')
-        .insert({
-          case_id: remarkCase.case_id,
-          action: 'Remark Added',
-          stage: 'OPEN',
-          old_status: remarkCase.status || 'OPEN',
-          new_status: remarkCase.status || 'OPEN',
-          remarks: text
-        })
+      const payload = {
+        case_id: remarkCase.case_id,
+        action: 'Remark Added',
+        stage: displayStatus(remarkCase.status || 'OPEN'),
+        old_status: remarkCase.status || 'OPEN',
+        new_status: remarkCase.status || 'OPEN',
+        remarks: text,
+        user_id: null,
+        user_name: 'SS Sundar Singh',
+        role: 'Admin'
+      }
 
-      if (error) throw new Error(error.message)
+      let result = await supabase.from('audit_trail').insert(payload)
+      if (result.error && /fetch|network|timeout/i.test(String(result.error.message || ''))) {
+        await new Promise(resolve => setTimeout(resolve, 900))
+        result = await supabase.from('audit_trail').insert(payload)
+      }
+      if (result.error) throw new Error(result.error.message)
 
       setRemarkCase(null)
       setRemarkText('')
+      setActionError('')
       await loadCases()
     } catch (error) {
       setActionError(
@@ -2557,6 +2578,8 @@ function App() {
           <TpaQcReport
             caseItem={tpaQcCase}
             cases={cases}
+            clients={clients}
+            locations={locations}
             form={tpaQcForm}
             updateField={updateTpaQcField}
             setForm={setTpaQcForm}
@@ -3594,7 +3617,7 @@ function App() {
   )
 }
 
-function TpaQcReport({ caseItem, cases = [], form, updateField, setForm, saving, message, onOpenCase, onSave, onSubmit, onRemarks, onReject, onHistory }) {
+function TpaQcReport({ caseItem, cases = [], clients = [], locations = [], form, updateField, setForm, saving, message, onOpenCase, onSave, onSubmit, onRemarks, onReject, onHistory }) {
   if (!caseItem) {
     const normalize = value => String(value || '').trim().toUpperCase().replace(/-/g, '_').replace(/\s+/g, '_')
     const tpaQcCases = cases.filter(item => normalize(item.status) === 'PRE_QC')
@@ -3649,19 +3672,63 @@ function TpaQcReport({ caseItem, cases = [], form, updateField, setForm, saving,
     )
   }
 
-  const reportField = (label, key, disabled = false) => (
+  const dateValue = value => {
+    const text = String(value || '').trim()
+    return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : ''
+  }
+
+  const selectField = (label, key, options, disabled = false) => (
     <label style={{ display: 'grid', gridTemplateColumns: '145px 1fr', alignItems: 'center', gap: 8, fontSize: 10, minHeight: 27 }}>
       <span style={{ fontWeight: 700, color: '#222' }}>{label}</span>
-      <input
-        value={form[key] || ''}
-        disabled={disabled}
-        onChange={e => updateField(key, e.target.value)}
-        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '3px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: disabled ? '#f7f7f7' : '#fff' }}
-      />
+      <select value={form[key] || ''} disabled={disabled} onChange={e => updateField(key, e.target.value)}
+        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '2px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: disabled ? '#f7f7f7' : '#fff' }}>
+        <option value="">Select</option>
+        {options.map(option => <option key={option} value={option}>{option}</option>)}
+      </select>
     </label>
   )
 
-  const ratingOptions = ['Good', 'Scratched', 'Dented', 'Ok', 'Available', 'Not Available', 'Not Applicable']
+  const dateField = (label, key, disabled = false) => (
+    <label style={{ display: 'grid', gridTemplateColumns: '145px 1fr', alignItems: 'center', gap: 8, fontSize: 10, minHeight: 27 }}>
+      <span style={{ fontWeight: 700, color: '#222' }}>{label}</span>
+      <input type="date" value={dateValue(form[key])} disabled={disabled} onChange={e => updateField(key, e.target.value)}
+        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '2px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: disabled ? '#f7f7f7' : '#fff' }} />
+    </label>
+  )
+
+  const textField = (label, key, disabled = false) => (
+    <label style={{ display: 'grid', gridTemplateColumns: '145px 1fr', alignItems: 'center', gap: 8, fontSize: 10, minHeight: 27 }}>
+      <span style={{ fontWeight: 700, color: '#222' }}>{label}</span>
+      <input value={form[key] || ''} disabled={disabled} onChange={e => updateField(key, e.target.value)}
+        style={{ width: '100%', boxSizing: 'border-box', height: 25, padding: '3px 6px', border: '1px solid #bdbdbd', borderRadius: 0, fontSize: 10, background: disabled ? '#f7f7f7' : '#fff' }} />
+    </label>
+  )
+
+  const fuelOptions = ['DIESEL','PETROL','CNG','LPG','ELECTRIC','HYBRID','PETROL+CNG']
+  const transmissionOptions = ['MANUAL','AUTOMATIC','iMT','AT','AMT','CVT','DCT']
+  const colorOptions = ['Beige','Black','Blue','Bronze','Brown','Gold','Gray','Green','Maroon','Navy Blue','Orange','Pink','Purple','Red','Silver','Sky Blue','Teal','White','Yellow']
+  const bodyTypeOptions = ['Hatchback','Sedan','SUV','MUV','MPV','Coupe','Convertible','Pickup','Truck','Wagon','Crossover','Van','Limousine']
+  const yesNoOptions = ['YES','NO']
+  const insuranceOptions = ['Comprehensive','Third Party']
+  const inspectionOptions = ['Physical Inspection','Digital Inspection']
+
+  const financierOptions = [
+    'State Bank of India','Bank of Baroda','Punjab National Bank','Canara Bank','Union Bank of India','Bank of India',
+    'Indian Bank','Central Bank of India','Indian Overseas Bank','UCO Bank','Bank of Maharashtra','Punjab & Sind Bank',
+    'HDFC Bank','ICICI Bank','Axis Bank','Kotak Mahindra Bank','IndusInd Bank','IDFC FIRST Bank','Federal Bank',
+    'YES BANK','RBL Bank','AU Small Finance Bank','Ujjivan Small Finance Bank','Equitas Small Finance Bank',
+    'Bajaj Finance','Tata Capital','Mahindra Finance','Cholamandalam Investment and Finance','Shriram Finance',
+    'Muthoot Finance','Manappuram Finance','L&T Finance','Aditya Birla Finance','Hero FinCorp','TVS Credit',
+    'HDB Financial Services','Hinduja Leyland Finance','Sundaram Finance','Magma Finance','Poonawalla Fincorp',
+    'Clix Capital','DMI Finance','KreditBee','Lendingkart','IIFL Finance','JM Financial','Sammaan Capital',
+    'Home First Finance','Aavas Financiers','Five-Star Business Finance','Aptus Value Housing Finance'
+  ]
+
+  const cityOptions = [...new Set(
+    locations.map(row => firstValue(row, ['city','CITY','City'])).filter(Boolean).map(v => String(v).trim())
+  )].sort((a,b) => a.localeCompare(b))
+
+  const ratingOptions = ['Good', 'Average', 'Bad', 'Scratched', 'Dented', 'Ok', 'Available', 'Not Available', 'Not Applicable']
 
   // Inspection rating -> score. "Not Applicable" is excluded from averages.
   const ratingToScore = {
@@ -3670,6 +3737,8 @@ function TpaQcReport({ caseItem, cases = [], form, updateField, setForm, saving,
     Available: 10,
     Scratched: 7,
     Dented: 5,
+    Average: 5,
+    Bad: 0,
     'Not Available': 0
   }
 
@@ -3738,8 +3807,8 @@ function TpaQcReport({ caseItem, cases = [], form, updateField, setForm, saving,
   const media = [
     'Profile Picture', 'Right View', 'Right Quarter Panel', 'Rear View', 'Left Quarter Panel', 'Left View', 'Left Side Profile Pic', 'Front View',
     'Engine Compartment 1', 'Engine Compartment 2', 'Engine Compartment 3', 'Boot / Dicky', 'Front Windscreen', 'Windscreen - Interior (from rear seat)',
-    'Dashboard', 'Odometer Reading 1', 'Odometer Reading 2', 'ABC Pedals (from driver seat)', 'Selfie with Vehicle', 'Other Images 1', 'Other Images 2', 'Other Images 3',
-    'VIN Plate Photo', 'Chassis Imprint 1', 'Chassis Imprint 2', 'Pencil Tracing 1', 'Pencil Tracing 2'
+    'Dashboard', 'Odometer Reading', 'ABC Pedals (from driver seat)', 'Selfie with Vehicle', 'Other Images 1', 'Other Images 2', 'Other Images 3',
+    'VIN Plate Photo', 'Chassis Imprint', 'Pencil Tracing'
   ]
 
   const vahanFields = ['Registration Number','Manufacturing Date','Registered RTO','Registration Date','Owner Name','RC Blacklist Status','Owner Count','Fitness Upto','Owner Permanent Address','Name of Financier','Owner Present Address','Insurer','Vehicle Name','Policy Number','Make','Insurance Valid Upto','Model','PUCC Number','Vehicle Category','PUCC Valid Upto','Vehicle Class','NP Issued By','Wheel Base','NP Number','Chassis Number','NP Valid Upto','Engine Number','Permit Issue Date','Car Color','Permit Number','Fuel Type','Permit Type','Fuel Norms','Permit Valid From','Engine Capacity','Permit Valid Upto','Gross Vehicle Weight','RC Tax Upto','Seating Capacity','Body Type','Sleeper Capacity']
@@ -3799,36 +3868,36 @@ function TpaQcReport({ caseItem, cases = [], form, updateField, setForm, saving,
 
         {section('A', 'Vehicle Details',
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 24, rowGap: 1 }}>
-            {reportField('Registration No.', 'registration_number')}
-            {reportField('RTO', 'rto')}
-            {reportField('Manufacturing Date', 'manufacturing_date')}
-            {reportField('Registration Date', 'registration_date')}
-            {reportField('No. of Owners', 'owner_count')}
-            {reportField('Odometer Reading', 'odometer')}
-            {reportField('Fuel Type', 'fuel')}
-            {reportField('Transmission', 'transmission')}
-            {reportField('Color', 'color')}
-            {reportField('Body Type', 'body_type')}
-            {reportField('Engine Number', 'engine_number')}
-            {reportField('Chassis Number', 'chassis_number')}
-            {reportField('Loan No./Ref. No.', 'loan_number')}
-            {reportField('RC Available', 'rc_available')}
-            {reportField('Insurance Type', 'insurance_type')}
-            {reportField('Insurance Validity', 'insurance_validity')}
-            {reportField('Insurance Expiry', 'insurance_expiry')}
-            {reportField('Third Party Validity', 'third_party_validity')}
-            {reportField('Hypothecation', 'hypothecation')}
-            {reportField('Financier', 'financier')}
-            {reportField('CNG/LPG Fitment', 'cng_fitment')}
-            {reportField('CNG/LPG Category', 'cng_category')}
-            {reportField('Road Tax Validity', 'road_tax_validity')}
-            {reportField('Road Tax Date', 'road_tax_date')}
-            {reportField('Customer Name', 'customer_name')}
-            {reportField('Client Name', 'client_name')}
-            {reportField('CNG Validity Date', 'cng_validity')}
-            {reportField('Key Available', 'key_available')}
-            {reportField('Inspection Type', 'inspection_type')}
-            {reportField('Inspection Site', 'inspection_site')}
+            {textField('Registration No.', 'registration_number', true)}
+            {textField('RTO', 'rto')}
+            {dateField('Manufacturing Date', 'manufacturing_date')}
+            {dateField('Registration Date', 'registration_date')}
+            {textField('No. of Owners', 'owner_count')}
+            {textField('Odometer Reading', 'odometer')}
+            {selectField('Fuel Type', 'fuel', fuelOptions)}
+            {selectField('Transmission', 'transmission', transmissionOptions)}
+            {selectField('Color', 'color', colorOptions)}
+            {selectField('Body Type', 'body_type', bodyTypeOptions)}
+            {textField('Engine Number', 'engine_number')}
+            {textField('Chassis Number', 'chassis_number')}
+            {textField('Loan No./Ref. No.', 'loan_number')}
+            {selectField('RC Available', 'rc_available', yesNoOptions)}
+            {selectField('Insurance Type', 'insurance_type', insuranceOptions)}
+            {dateField('Insurance Validity', 'insurance_validity')}
+            {dateField('Insurance Expiry', 'insurance_expiry')}
+            {dateField('Third Party Validity', 'third_party_validity')}
+            {selectField('Hypothecation', 'hypothecation', yesNoOptions)}
+            {selectField('Financier', 'financier', financierOptions)}
+            {selectField('CNG/LPG Fitment', 'cng_fitment', yesNoOptions)}
+            {selectField('CNG/LPG Category', 'cng_category', yesNoOptions)}
+            {dateField('Road Tax Validity', 'road_tax_validity')}
+            {dateField('Road Tax Date', 'road_tax_date')}
+            {textField('Customer Name', 'customer_name', true)}
+            {textField('Client Name', 'client_name', true)}
+            {dateField('CNG Validity Date', 'cng_validity')}
+            {selectField('Key Available', 'key_available', yesNoOptions)}
+            {selectField('Inspection Type', 'inspection_type', inspectionOptions)}
+            {selectField('Inspection Site', 'inspection_site', cityOptions)}
           </div>
         )}
 
