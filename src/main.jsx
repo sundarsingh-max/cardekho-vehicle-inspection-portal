@@ -1082,7 +1082,10 @@ function App() {
         throw new Error('Please select a different TPA.')
       }
 
-      const { data, error } = await supabase
+      // Update the case first. Do NOT depend on the UPDATE response body;
+      // Supabase can return an empty representation when the table has RLS
+      // policies or when the API does not return updated rows.
+      const { error: updateError } = await supabase
         .from('cases')
         .update({
           status: 'REASSIGNED',
@@ -1091,11 +1094,28 @@ function App() {
         })
         .eq('id', reassignCase.id)
         .in('status', ['ASSIGNED', 'REASSIGNED'])
-        .select('id, case_id, status, assigned_tpa_id, assigned_tpa_name')
 
-      if (error) throw new Error(error.message)
-      if (!data || data.length !== 1) {
-        throw new Error('Case was not reassigned. It may no longer be assigned or permissions/RLS may be blocking the update.')
+      if (updateError) throw new Error(updateError.message)
+
+      // Verify the saved state with a normal SELECT. This prevents the false
+      // "Case was not reassigned" error seen when UPDATE succeeds but returns
+      // no row representation.
+      const { data: verifiedCase, error: verifyError } = await supabase
+        .from('cases')
+        .select('id, case_id, status, assigned_tpa_id, assigned_tpa_name')
+        .eq('id', reassignCase.id)
+        .maybeSingle()
+
+      if (verifyError) throw new Error(verifyError.message)
+
+      if (
+        !verifiedCase ||
+        verifiedCase.status !== 'REASSIGNED' ||
+        String(verifiedCase.assigned_tpa_id || '') !== String(tpa.id)
+      ) {
+        throw new Error(
+          'Reassignment could not be verified. The case may have changed or Supabase permissions/RLS may be blocking the update.'
+        )
       }
 
       const { error: historyError } = await supabase
