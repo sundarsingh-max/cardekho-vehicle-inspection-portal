@@ -7,7 +7,9 @@ import {
   X,
   Pencil,
   History,
-  RefreshCw
+  RefreshCw,
+  UserPlus,
+  MessageSquare
 } from 'lucide-react'
 import { supabase } from './supabaseClient'
 import './styles.css'
@@ -40,6 +42,11 @@ function App() {
   const [hist, setHist] = useState(false)
   const [selectedCase, setSelectedCase] = useState(null)
   const [editCase, setEditCase] = useState(null)
+  const [assignCase, setAssignCase] = useState(null)
+  const [remarkCase, setRemarkCase] = useState(null)
+  const [remarkText, setRemarkText] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [actionSaving, setActionSaving] = useState(false)
 
   const [cases, setCases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -710,6 +717,65 @@ function App() {
     } finally {
       setSavingLead(false)
     }
+  }
+
+  function openAssignCase(item) {
+    setActionError('')
+    setAssignCase(item)
+  }
+
+  function openRemarkCase(item) {
+    setActionError('')
+    setRemarkText('')
+    setRemarkCase(item)
+  }
+
+  async function saveRemark() {
+    const text = remarkText.trim()
+
+    if (!remarkCase) {
+      setActionError('No case selected.')
+      return
+    }
+
+    if (!text) {
+      setActionError('Please enter remarks.')
+      return
+    }
+
+    setActionSaving(true)
+    setActionError('')
+
+    try {
+      const { error } = await supabase
+        .from('audit_trail')
+        .insert({
+          case_id: remarkCase.case_id,
+          action: 'Remark Added',
+          stage: 'OPEN',
+          old_status: remarkCase.status || 'OPEN',
+          new_status: remarkCase.status || 'OPEN',
+          remarks: text
+        })
+
+      if (error) throw new Error(error.message)
+
+      setRemarkCase(null)
+      setRemarkText('')
+      await loadCases()
+    } catch (error) {
+      setActionError(
+        error?.message || 'Unable to save remarks.'
+      )
+    } finally {
+      setActionSaving(false)
+    }
+  }
+
+  async function assignCaseToTpaPlaceholder() {
+    setActionError(
+      'TPA Master is not connected yet. Add active TPA records in TPA Master before assigning this case.'
+    )
   }
 
   async function saveLead(event) {
@@ -1434,6 +1500,7 @@ function App() {
                               <button
                                 type="button"
                                 title="Edit Lead"
+                                aria-label="Edit Lead"
                                 onClick={() => openEditLead(item)}
                               >
                                 <Pencil size={16} />
@@ -1442,6 +1509,7 @@ function App() {
                               <button
                                 type="button"
                                 title="History"
+                                aria-label="History"
                                 onClick={() => {
                                   setSelectedCase(item)
                                   setHist(true)
@@ -1452,10 +1520,20 @@ function App() {
 
                               <button
                                 type="button"
-                                title="View Lead"
-                                onClick={() => setSelectedCase(item)}
+                                title="Assign"
+                                aria-label="Assign"
+                                onClick={() => openAssignCase(item)}
                               >
-                                <Eye size={16} />
+                                <UserPlus size={16} />
+                              </button>
+
+                              <button
+                                type="button"
+                                title="Add Remarks"
+                                aria-label="Add Remarks"
+                                onClick={() => openRemarkCase(item)}
+                              >
+                                <MessageSquare size={16} />
                               </button>
                             </div>
                           </td>
@@ -1985,6 +2063,147 @@ function App() {
 
             </form>
 
+          </Modal>
+        )}
+
+        {assignCase && (
+          <Modal
+            title={`Assign Case — CASE-${assignCase.case_id}`}
+            close={() => {
+              if (!actionSaving) {
+                setAssignCase(null)
+                setActionError('')
+              }
+            }}
+          >
+            <div className="panel" style={{ marginBottom: 12 }}>
+              <strong>Case is currently OPEN</strong>
+              <p style={{ marginBottom: 0 }}>
+                Assign this case from Open Lead after an active TPA is available in TPA Master.
+              </p>
+            </div>
+
+            {actionError && (
+              <div
+                className="panel"
+                style={{
+                  marginBottom: 12,
+                  border: '1px solid #fecaca',
+                  background: '#fff1f2'
+                }}
+              >
+                <strong>Assign unavailable</strong>
+                <p>{actionError}</p>
+              </div>
+            )}
+
+            <div className="form-grid">
+              <Field
+                label="Case ID"
+                value={`CASE-${assignCase.case_id}`}
+                disabled
+              />
+              <Field
+                label="Customer"
+                value={assignCase.customer_name || ''}
+                disabled
+              />
+              <Field
+                label="Registration Number"
+                value={assignCase.registration_number || ''}
+                disabled
+              />
+              <Field
+                label="Current Status"
+                value={displayStatus(assignCase.status)}
+                disabled
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+              <button
+                type="button"
+                className="primary"
+                style={{ background: '#64748b' }}
+                onClick={() => setAssignCase(null)}
+                disabled={actionSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={assignCaseToTpaPlaceholder}
+                disabled={actionSaving}
+              >
+                <UserPlus size={16} /> Assign TPA
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {remarkCase && (
+          <Modal
+            title={`Add Remarks — CASE-${remarkCase.case_id}`}
+            close={() => {
+              if (!actionSaving) {
+                setRemarkCase(null)
+                setRemarkText('')
+                setActionError('')
+              }
+            }}
+          >
+            {actionError && (
+              <div
+                className="panel"
+                style={{
+                  marginBottom: 12,
+                  border: '1px solid #fecaca',
+                  background: '#fff1f2'
+                }}
+              >
+                <strong>Unable to save remarks</strong>
+                <p>{actionError}</p>
+              </div>
+            )}
+
+            <label className="field" style={{ width: '100%' }}>
+              <span>Remarks <b style={{ color: '#dc2626' }}>*</b></span>
+              <textarea
+                value={remarkText}
+                onChange={e => setRemarkText(e.target.value)}
+                placeholder="Enter remarks"
+                rows={6}
+                style={{
+                  width: '100%',
+                  resize: 'vertical',
+                  padding: 10,
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 8,
+                  fontFamily: 'inherit'
+                }}
+              />
+            </label>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+              <button
+                type="button"
+                className="primary"
+                style={{ background: '#64748b' }}
+                onClick={() => setRemarkCase(null)}
+                disabled={actionSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={saveRemark}
+                disabled={actionSaving}
+              >
+                {actionSaving ? 'Saving...' : 'Save Remarks'}
+              </button>
+            </div>
           </Modal>
         )}
 
