@@ -4,7 +4,10 @@ import {
   Bell,
   Database,
   Eye,
-  X
+  X,
+  Pencil,
+  History,
+  RefreshCw
 } from 'lucide-react'
 import { supabase } from './supabaseClient'
 import './styles.css'
@@ -35,6 +38,8 @@ function App() {
   const [active, setActive] = useState('Dashboard')
   const [add, setAdd] = useState(false)
   const [hist, setHist] = useState(false)
+  const [selectedCase, setSelectedCase] = useState(null)
+  const [editCase, setEditCase] = useState(null)
 
   const [cases, setCases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -197,47 +202,77 @@ function App() {
       .slice(0, 20)
   }, [cases, search])
 
-  const segments = [
-    'CAR',
-    'CV',
-    'FE',
-    '3WLR',
-    '2WLR',
-    'CE'
-  ]
+  const openLeads = useMemo(() => {
+    const q = search.trim().toLowerCase()
 
-  const mmvHasSegment = useMemo(() => {
-    return mmv.some(row =>
-      String(
+    return cases
+      .filter(item => {
+        const status = String(item.status || '')
+          .trim()
+          .toUpperCase()
+          .replace(/-/g, '_')
+          .replace(/\s+/g, '_')
+
+        return status === 'OPEN'
+      })
+      .filter(item => {
+        if (!q) return true
+
+        return [
+          item.case_id,
+          item.customer_name,
+          item.registration_number,
+          item.mobile_phone,
+          item.make,
+          item.model,
+          item.variant,
+          item.loan_number,
+          item.bank_executive_name,
+          item.bank_executive_mobile
+        ]
+          .filter(Boolean)
+          .some(value =>
+            String(value).toLowerCase().includes(q)
+          )
+      })
+  }, [cases, search])
+
+  const segments = useMemo(() => {
+    return [
+      'CAR',
+      'CV',
+      'FE',
+      '3WLR',
+      '2WLR',
+      'CE'
+    ]
+  }, [])
+
+  // MMV master now contains a real `segment` column.
+  // Always filter by Segment first; never fall back to all makes.
+  const mmvRowsForSelection = useMemo(() => {
+    if (!form.segment) return []
+
+    const selectedSegment = String(form.segment)
+      .trim()
+      .toUpperCase()
+
+    return mmv.filter(row => {
+      const rowSegment = String(
         firstValue(row, [
           'segment',
-          'Segment',
           'SEGMENT',
+          'Segment',
           'vehicle_segment',
           'VEHICLE_SEGMENT'
         ]) || ''
-      ).trim() !== ''
-    )
-  }, [mmv])
-
-  const mmvRowsForSelection = useMemo(() => {
-    return mmv.filter(row => {
-      const rowSegment = firstValue(row, [
-        'segment',
-        'Segment',
-        'SEGMENT',
-        'vehicle_segment',
-        'VEHICLE_SEGMENT'
-      ])
-
-      if (!form.segment || !mmvHasSegment) return true
-
-      return (
-        String(rowSegment || '').trim().toUpperCase() ===
-        String(form.segment).trim().toUpperCase()
       )
+        .trim()
+        .toUpperCase()
+
+      return rowSegment === selectedSegment
     })
-  }, [mmv, mmvHasSegment, form.segment])
+  }, [mmv, form.segment])
 
   const makes = useMemo(() => {
     return uniqueValues(
@@ -248,75 +283,84 @@ function App() {
           'Make'
         ])
       )
-    )
+    ).sort((a, b) => a.localeCompare(b))
   }, [mmvRowsForSelection])
+
+  const mmvRowsForSelectedMake = useMemo(() => {
+    if (!form.segment || !form.make) return []
+
+    const selectedMake = String(form.make)
+      .trim()
+      .toUpperCase()
+
+    return mmvRowsForSelection.filter(row => {
+      const rowMake = String(
+        firstValue(row, [
+          'make',
+          'MAKE',
+          'Make'
+        ]) || ''
+      )
+        .trim()
+        .toUpperCase()
+
+      return rowMake === selectedMake
+    })
+  }, [mmvRowsForSelection, form.make, form.segment])
 
   const models = useMemo(() => {
     return uniqueValues(
-      mmvRowsForSelection
-        .filter(row => {
-          const rowMake = firstValue(row, [
-            'make',
-            'MAKE',
-            'Make'
-          ])
+      mmvRowsForSelectedMake.map(row =>
+        firstValue(row, [
+          'model',
+          'MODEL',
+          'Model'
+        ])
+      )
+    ).sort((a, b) => a.localeCompare(b))
+  }, [mmvRowsForSelectedMake])
 
-          return (
-            !form.make ||
-            String(rowMake || '').trim().toUpperCase() ===
-              String(form.make).trim().toUpperCase()
-          )
-        })
-        .map(row =>
-          firstValue(row, [
-            'model',
-            'MODEL',
-            'Model'
-          ])
-        )
-    )
-  }, [mmvRowsForSelection, form.make])
+  const mmvRowsForSelectedModel = useMemo(() => {
+    if (!form.segment || !form.make || !form.model) return []
+
+    const selectedModel = String(form.model)
+      .trim()
+      .toUpperCase()
+
+    return mmvRowsForSelectedMake.filter(row => {
+      const rowModel = String(
+        firstValue(row, [
+          'model',
+          'MODEL',
+          'Model'
+        ]) || ''
+      )
+        .trim()
+        .toUpperCase()
+
+      return rowModel === selectedModel
+    })
+  }, [mmvRowsForSelectedMake, form.model, form.make, form.segment])
 
   const variants = useMemo(() => {
     return uniqueValues(
-      mmvRowsForSelection
-        .filter(row => {
-          const rowMake = firstValue(row, [
-            'make',
-            'MAKE',
-            'Make'
-          ])
+      mmvRowsForSelectedModel.map(row =>
+        firstValue(row, [
+          'variant',
+          'VARIANT',
+          'Variant'
+        ])
+      )
+    ).sort((a, b) => a.localeCompare(b))
+  }, [mmvRowsForSelectedModel])
 
-          const rowModel = firstValue(row, [
-            'model',
-            'MODEL',
-            'Model'
-          ])
-
-          return (
-            (!form.make ||
-              String(rowMake || '').trim().toUpperCase() ===
-                String(form.make).trim().toUpperCase()) &&
-            (!form.model ||
-              String(rowModel || '').trim().toUpperCase() ===
-                String(form.model).trim().toUpperCase())
-          )
-        })
-        .map(row =>
-          firstValue(row, [
-            'variant',
-            'VARIANT',
-            'Variant'
-          ])
-        )
-    )
-  }, [mmvRowsForSelection, form.make, form.model])
-
+  // Manufacturing Year is independent of MMV rows.
+  // It starts at 2010 and automatically includes the current year.
   const years = useMemo(() => {
     const currentYear = new Date().getFullYear()
     const result = []
 
-    for (let year = currentYear; year >= 2000; year--) {
+    for (let year = currentYear; year >= 2010; year--) {
       result.push(String(year))
     }
 
@@ -588,6 +632,119 @@ function App() {
         : 100000
 
     return lastCaseId + 1
+  }
+
+  function openEditLead(item) {
+    setSelectedCase(item)
+    setEditCase(item)
+    setFormError('')
+    setFormSuccess('')
+    setForm({
+      loan_number: item.loan_number || '',
+      bank_executive_name: item.bank_executive_name || '',
+      bank_executive_mobile: item.bank_executive_mobile || '',
+      customer_name: item.customer_name || '',
+      mobile_phone: item.mobile_phone || '',
+      registration_number: item.registration_number || '',
+      client_id: item.client_id || '',
+      segment: item.segment || '',
+      make: item.make || '',
+      model: item.model || '',
+      variant: item.variant || '',
+      mfg_year: item.mfg_year ? String(item.mfg_year) : '',
+      zone: item.zone || '',
+      state: item.state || '',
+      city: item.city || ''
+    })
+    setAdd(true)
+  }
+
+  function closeLeadForm() {
+    if (savingLead) return
+    setAdd(false)
+    setEditCase(null)
+    setSelectedCase(null)
+    setFormError('')
+    setFormSuccess('')
+    setForm({
+      loan_number: '',
+      bank_executive_name: '',
+      bank_executive_mobile: '',
+      customer_name: '',
+      mobile_phone: '',
+      registration_number: '',
+      client_id: '',
+      segment: '',
+      make: '',
+      model: '',
+      variant: '',
+      mfg_year: '',
+      zone: '',
+      state: '',
+      city: ''
+    })
+  }
+
+  async function updateLead(event) {
+    event.preventDefault()
+    setFormError('')
+    setFormSuccess('')
+
+    const validationError = validateLead()
+    if (validationError) {
+      setFormError(validationError)
+      return
+    }
+
+    if (!editCase) {
+      setFormError('No lead selected for editing.')
+      return
+    }
+
+    setSavingLead(true)
+
+    try {
+      const payload = {
+        loan_number: form.loan_number.trim() || null,
+        bank_executive_name: form.bank_executive_name.trim(),
+        bank_executive_mobile: form.bank_executive_mobile.trim(),
+        customer_name: form.customer_name.trim(),
+        mobile_phone: form.mobile_phone.trim(),
+        registration_number: form.registration_number.trim().toUpperCase(),
+        client_id: form.client_id,
+        segment: form.segment,
+        make: form.make,
+        model: form.model,
+        variant: form.variant,
+        mfg_year: Number(form.mfg_year),
+        zone: form.zone,
+        state: form.state,
+        city: form.city
+      }
+
+      const { data, error } = await supabase
+        .from('cases')
+        .update(payload)
+        .eq('id', editCase.id)
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Update lead error:', error)
+        throw new Error(error.message)
+      }
+
+      setFormSuccess(
+        `Lead updated successfully. Case ID: CASE-${data.case_id}`
+      )
+      await loadCases()
+    } catch (error) {
+      setFormError(
+        error?.message || 'Unable to update lead.'
+      )
+    } finally {
+      setSavingLead(false)
+    }
   }
 
   async function saveLead(event) {
@@ -1145,23 +1302,195 @@ function App() {
 
             <Database />
 
-            <h2>
-              Add Lead
-            </h2>
+            <h2>Add Lead</h2>
 
             <p>
-              Create a new vehicle
-              inspection case.
+              Create a new vehicle inspection case.
             </p>
 
             <button
               className="primary"
-              onClick={() =>
+              onClick={() => {
+                setEditCase(null)
+                setFormError('')
+                setFormSuccess('')
                 setAdd(true)
-              }
+              }}
             >
               ＋ Add Lead
             </button>
+
+          </section>
+
+        ) : String(active || '').trim() === 'Open Lead' ? (
+
+          <section className="panel">
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+                marginBottom: 16
+              }}
+            >
+              <div>
+                <h2 style={{ marginBottom: 4 }}>
+                  Open Leads
+                </h2>
+                <p style={{ margin: 0 }}>
+                  Live OPEN cases from Supabase
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="primary"
+                onClick={loadCases}
+                disabled={loading}
+              >
+                <RefreshCw size={16} />
+                {loading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+
+            {dbError && (
+              <div
+                className="panel"
+                style={{
+                  marginBottom: 16,
+                  border: '1px solid #fecaca',
+                  background: '#fff1f2'
+                }}
+              >
+                <strong>Database connection error</strong>
+                <p>{dbError}</p>
+              </div>
+            )}
+
+            {loading ? (
+              <p>Loading leads from Supabase...</p>
+            ) : openLeads.length === 0 ? (
+              <div
+                style={{
+                  padding: 28,
+                  textAlign: 'center',
+                  border: '1px dashed #cbd5e1',
+                  borderRadius: 12
+                }}
+              >
+                <Database size={38} />
+                <h3>No Open Leads Found</h3>
+                <p>
+                  Create a lead from Add Lead and it will
+                  appear here automatically.
+                </p>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Lead ID</th>
+                      <th>Customer</th>
+                      <th>Registration No.</th>
+                      <th>Vehicle</th>
+                      <th>Loan Number</th>
+                      <th>Bank Executive</th>
+                      <th>Status</th>
+                      <th>Date</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {openLeads.map(item => (
+                        <tr key={item.id}>
+                          <td>
+                            <strong>CASE-{item.case_id}</strong>
+                          </td>
+
+                          <td>
+                            {item.customer_name || '—'}
+                            <br />
+                            <small>{item.mobile_phone || ''}</small>
+                          </td>
+
+                          <td>
+                            {item.registration_number || '—'}
+                          </td>
+
+                          <td>
+                            {[
+                              item.make,
+                              item.model,
+                              item.variant
+                            ]
+                              .filter(Boolean)
+                              .join(' ') || '—'}
+                          </td>
+
+                          <td>{item.loan_number || '—'}</td>
+
+                          <td>
+                            {item.bank_executive_name || '—'}
+                            <br />
+                            <small>
+                              {item.bank_executive_mobile || ''}
+                            </small>
+                          </td>
+
+                          <td>
+                            <span className="status">
+                              {displayStatus(item.status)}
+                            </span>
+                          </td>
+
+                          <td>{formatDate(item.created_at)}</td>
+
+                          <td>
+                            <div
+                              style={{
+                                display: 'flex',
+                                gap: 6,
+                                flexWrap: 'wrap'
+                              }}
+                            >
+                              <button
+                                type="button"
+                                title="Edit Lead"
+                                onClick={() => openEditLead(item)}
+                              >
+                                <Pencil size={16} />
+                              </button>
+
+                              <button
+                                type="button"
+                                title="History"
+                                onClick={() => {
+                                  setSelectedCase(item)
+                                  setHist(true)
+                                }}
+                              >
+                                <History size={16} />
+                              </button>
+
+                              <button
+                                type="button"
+                                title="View Lead"
+                                onClick={() => setSelectedCase(item)}
+                              >
+                                <Eye size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
           </section>
 
@@ -1171,20 +1500,18 @@ function App() {
 
             <Database />
 
-            <h2>
-              {active}
-            </h2>
+            <h2>{active}</h2>
 
             <p>
-              Module ready for the
-              next implementation stage.
+              Module ready for the next implementation stage.
             </p>
 
             <button
               className="primary"
-              onClick={() =>
+              onClick={() => {
+                setEditCase(null)
                 setAdd(true)
-              }
+              }}
             >
               ＋ Add Lead
             </button>
@@ -1196,19 +1523,13 @@ function App() {
         {add && (
 
           <Modal
-            title="Add Lead"
-            close={() => {
-              if (!savingLead) {
-                setAdd(false)
-                setFormError('')
-                setFormSuccess('')
-              }
-            }}
+            title={editCase ? 'Edit Lead' : 'Add Lead'}
+            close={closeLeadForm}
           >
 
             <form
               className="form"
-              onSubmit={saveLead}
+              onSubmit={editCase ? updateLead : saveLead}
             >
 
               {formError && (
@@ -1258,7 +1579,11 @@ function App() {
 
                 <Field
                   label="Case ID"
-                  value="Auto-generated"
+                  value={
+                    editCase
+                      ? `CASE-${editCase.case_id}`
+                      : 'Auto-generated'
+                  }
                   disabled
                 />
 
@@ -1666,9 +1991,7 @@ function App() {
                     background:
                       '#64748b'
                   }}
-                  onClick={() =>
-                    setAdd(false)
-                  }
+                  onClick={closeLeadForm}
                   disabled={savingLead}
                 >
                   Cancel
@@ -1680,8 +2003,8 @@ function App() {
                   disabled={savingLead}
                 >
                   {savingLead
-                    ? 'Saving Lead...'
-                    : 'Create Lead'}
+                    ? (editCase ? 'Updating Lead...' : 'Saving Lead...')
+                    : (editCase ? 'Update Lead' : 'Create Lead')}
                 </button>
 
               </div>
@@ -1694,30 +2017,98 @@ function App() {
         {hist && (
 
           <Modal
-            title="Case History"
-            close={() =>
-              setHist(false)
+            title={
+              selectedCase
+                ? `Case Details — CASE-${selectedCase.case_id}`
+                : 'Case History'
             }
+            close={() => {
+              setHist(false)
+              setSelectedCase(null)
+            }}
           >
 
             <div className="history">
 
-              <p>
-                <b>
-                  History module
-                </b>
+              {selectedCase ? (
+                <>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns:
+                        'repeat(2, minmax(0, 1fr))',
+                      gap: 12,
+                      marginBottom: 16
+                    }}
+                  >
+                    <div>
+                      <small>Customer</small>
+                      <strong>
+                        {selectedCase.customer_name || '—'}
+                      </strong>
+                    </div>
 
-                <small>
-                  Full audit trail will
-                  be connected in the
-                  next stage.
-                </small>
-              </p>
+                    <div>
+                      <small>Registration Number</small>
+                      <strong>
+                        {selectedCase.registration_number || '—'}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <small>Vehicle</small>
+                      <strong>
+                        {[
+                          selectedCase.make,
+                          selectedCase.model,
+                          selectedCase.variant
+                        ]
+                          .filter(Boolean)
+                          .join(' ') || '—'}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <small>Status</small>
+                      <strong>
+                        {displayStatus(selectedCase.status)}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <small>Loan Number</small>
+                      <strong>
+                        {selectedCase.loan_number || '—'}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <small>Created</small>
+                      <strong>
+                        {formatDate(selectedCase.created_at)}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <p>
+                    <b>Audit Trail</b>
+                    <small>
+                      Detailed immutable audit events will be
+                      connected in the Audit Trail stage.
+                    </small>
+                  </p>
+                </>
+              ) : (
+                <p>No case selected.</p>
+              )}
 
             </div>
 
           </Modal>
+
         )}
+
+
 
       </main>
     </div>
