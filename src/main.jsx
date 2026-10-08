@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
   Bell,
@@ -1140,7 +1140,7 @@ function App() {
       cng_fitment: item?.cng_fitment || '', cng_category: item?.cng_category || '', road_tax_validity: item?.road_tax_validity || '', road_tax_date: item?.road_tax_date || '',
       customer_name: item?.customer_name || '', proposer_name: item?.proposer_name || '', client_name: item?.client_name || item?.client || '', cng_validity: item?.cng_validity || '',
       key_available: item?.key_available || '', inspection_type: item?.inspection_type || 'Physical Inspection', inspection_site: item?.city || '', remarks: '',
-      overall_score: '', body_score: '', exterior_score: '', light_score: '', tyre_score: '', other_score: '', condition: '', detailed: {}, media: {}, exteriorVideo: null, assessed_value: '', market_value: '', recommended_value: '', salvage_value: '', repair_estimate: '', pricing_remarks: '', final_observations: ''
+      overall_score: '', body_score: '', exterior_score: '', light_score: '', tyre_score: '', other_score: '', condition: '', detailed: {}, media: {}, exteriorVideo: null, valuation_price: '', pricing_remarks: '', pdf_url: '', pdf_size: '', pdf_generated_at: ''
     }
   }
 
@@ -1240,11 +1240,13 @@ function App() {
     finally { setActionSaving(false) }
   }
 
-  async function pricingFinalSubmit(item) {
+  async function pricingFinalSubmit(item, pdfMeta = null) {
     if (!item) return
     setActionSaving(true); setActionError('')
     try {
-      await persistMasterInspectionReport(item, tpaQcForm, 'Pricing', true)
+      const finalForm = pdfMeta ? { ...tpaQcForm, pdf_url: pdfMeta.pdfUrl, pdf_size: pdfMeta.pdfSize, pdf_generated_at: new Date().toISOString() } : tpaQcForm
+      setTpaQcForm(finalForm)
+      await persistMasterInspectionReport(item, finalForm, 'Pricing', true)
       const { error } = await supabase.from('cases').update({ status: 'COMPLETED' }).eq('id', item.id).eq('status', 'PRICING')
       if (error) throw new Error(error.message)
       await supabase.from('audit_trail').insert({ case_id: item.case_id, action: 'Final Submitted / Report Generated', stage: 'Pricing', old_status: 'PRICING', new_status: 'COMPLETED', user_id: null, user_name: 'SS Sundar Singh', role: 'Admin' })
@@ -3727,6 +3729,12 @@ function App() {
 }
 
 function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], locations = [], form, updateField, setForm, saving, message, onOpenCase, onSave, onSubmit, onRemarks, onReject, onHistory, onHold }) {
+  const reportRef = useRef(null)
+  const [photoViewer, setPhotoViewer] = useState(null)
+  const [photoZoom, setPhotoZoom] = useState(1)
+  const [pdfGenerating, setPdfGenerating] = useState(false)
+  const [pdfMessage, setPdfMessage] = useState('')
+
   if (!caseItem) {
     const normalize = value => String(value || '').trim().toUpperCase().replace(/-/g, '_').replace(/\s+/g, '_')
     const statusMap = { 'TPA QC': 'PRE_QC', 'QC': 'QC', 'QC Hold': 'QC_HOLD', 'Pricing': 'PRICING', 'Report Generated': 'COMPLETED' }
@@ -3785,6 +3793,119 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
   const dateValue = value => {
     const text = String(value || '').trim()
     return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : ''
+  }
+
+  const loadExternalScript = src => new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-cd-pdf=\"${src}\"]`)
+    if (existing) {
+      if (existing.dataset.loaded === 'true') return resolve()
+      existing.addEventListener('load', () => resolve(), { once: true })
+      existing.addEventListener('error', () => reject(new Error(`Unable to load ${src}`)), { once: true })
+      return
+    }
+    const script = document.createElement('script')
+    script.src = src
+    script.async = true
+    script.dataset.cdPdf = src
+    script.onload = () => { script.dataset.loaded = 'true'; resolve() }
+    script.onerror = () => reject(new Error(`Unable to load ${src}`))
+    document.head.appendChild(script)
+  })
+
+  const compressImageDataUrl = (dataUrl, maxWidth = 1000, maxHeight = 750, quality = 0.62) => new Promise(resolve => {
+    const img = new Image()
+    img.onload = () => {
+      const ratio = Math.min(1, maxWidth / img.naturalWidth, maxHeight / img.naturalHeight)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * ratio))
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * ratio))
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      resolve(canvas.toDataURL('image/jpeg', quality))
+    }
+    img.onerror = () => resolve(dataUrl)
+    img.src = dataUrl
+  })
+
+  const generateInspectionPdf = async () => {
+    if (!reportRef.current) throw new Error('Report is not ready for PDF generation.')
+    setPdfGenerating(true)
+    setPdfMessage('Generating compressed PDF...')
+    try {
+      await loadExternalScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
+      await loadExternalScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+      const JsPdf = window.jspdf?.jsPDF
+      if (!JsPdf || !window.html2canvas) throw new Error('PDF engine could not be loaded.')
+
+      const node = reportRef.current
+      const attempts = [
+        { scale: 0.62, quality: 0.58 },
+        { scale: 0.50, quality: 0.48 },
+        { scale: 0.42, quality: 0.40 },
+        { scale: 0.35, quality: 0.34 },
+        { scale: 0.28, quality: 0.28 },
+        { scale: 0.22, quality: 0.22 }
+      ]
+      let finalBlob = null
+      let finalDoc = null
+
+      for (const attempt of attempts) {
+        const doc = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true })
+        await new Promise((resolve, reject) => {
+          doc.html(node, {
+            x: 5,
+            y: 5,
+            width: 200,
+            windowWidth: node.scrollWidth,
+            autoPaging: 'text',
+            margin: [5, 5, 5, 5],
+            html2canvas: {
+              scale: attempt.scale,
+              useCORS: true,
+              backgroundColor: '#ffffff',
+              imageTimeout: 0,
+              logging: false
+            },
+            callback: pdf => {
+              try {
+                const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl
+                if (videoUrl) {
+                  pdf.addPage()
+                  pdf.setFontSize(12)
+                  pdf.text('Exterior Inspection Video', 15, 20)
+                  pdf.setFontSize(10)
+                  pdf.setTextColor(30, 80, 180)
+                  pdf.textWithLink('▶ Play / Open Video', 15, 32, { url: videoUrl })
+                  pdf.setTextColor(0, 0, 0)
+                }
+                finalDoc = pdf
+                const blob = pdf.output('blob')
+                finalBlob = blob
+                resolve()
+              } catch (e) { reject(e) }
+            }
+          })
+        })
+        if (finalBlob && finalBlob.size <= 2 * 1024 * 1024) break
+      }
+
+      if (!finalBlob || !finalDoc) throw new Error('Unable to generate PDF.')
+      if (finalBlob.size > 2 * 1024 * 1024) {
+        throw new Error('PDF is still above 2MB after compression. Reduce/replace very large photos and generate again.')
+      }
+
+      const path = `${caseItem.case_id}/${Date.now()}_inspection_report.pdf`
+      const upload = await supabase.storage.from('inspection-reports').upload(path, finalBlob, { contentType: 'application/pdf', upsert: true })
+      if (upload.error) throw new Error(`PDF upload failed: ${upload.error.message}`)
+      const { data: publicData } = supabase.storage.from('inspection-reports').getPublicUrl(path)
+      const pdfUrl = publicData?.publicUrl || ''
+      setPdfMessage(`PDF generated successfully (${(finalBlob.size / 1024).toFixed(0)} KB).`)
+      return { pdfUrl, pdfSize: finalBlob.size }
+    } finally {
+      setPdfGenerating(false)
+    }
   }
 
   const selectField = (label, key, options, disabled = false) => (
@@ -3955,7 +4076,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       <div className="panel" style={{ marginBottom: 12, position: 'sticky', top: 0, zIndex: 5 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div>
-            <h2 style={{ margin: 0 }}>TPA QC — Vehicle Inspection Report</h2>
+            <h2 style={{ margin: 0 }}>{mode} — Vehicle Inspection Report</h2>
             <small>{caseItem.case_id} · {caseItem.registration_number || 'Registration not available'} · Single-page merged report</small>
           </div>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
@@ -3967,13 +4088,15 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
             {mode === 'TPA QC' && <button className="primary" type="button" onClick={onSubmit} disabled={saving}>Submit to QC</button>}
             {mode === 'QC' && <button className="primary" type="button" onClick={onSubmit} disabled={saving}>Approve &amp; Send to Pricing</button>}
             {mode === 'QC Hold' && <button className="primary" type="button" onClick={onSubmit} disabled={saving}>Resubmit to QC</button>}
-            {mode === 'Pricing' && <button className="primary" type="button" onClick={onSubmit} disabled={saving}>Final Submit &amp; Generate Report</button>}
+            {mode === 'Pricing' && <button className="primary" type="button" onClick={async () => { try { const meta = await generateInspectionPdf(); await onSubmit(meta) } catch (e) { setPdfMessage(e?.message || 'Unable to generate PDF.') } }} disabled={saving || pdfGenerating}> {pdfGenerating ? 'Generating PDF...' : 'Final Submit & Generate Report'}</button>}
+            {(mode === 'Report Generated' && form.pdf_url) && <a href={form.pdf_url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', padding: '7px 10px', border: '1px solid #1d4ed8', color: '#1d4ed8', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Open PDF</a>}
           </div>
         </div>
         {message && <div style={{ marginTop: 8, padding: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: 12 }}>{message}</div>}
+        {pdfMessage && <div style={{ marginTop: 8, padding: 8, background: '#eff6ff', border: '1px solid #bfdbfe', fontSize: 11 }}>{pdfMessage}</div>}
       </div>
 
-      <div style={reportShell}>
+      <div ref={reportRef} style={reportShell}>
         {reportHeader}
 
         <div style={{ marginTop: 12, fontSize: 17, fontWeight: 800 }}>
@@ -4115,13 +4238,14 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                   return
                 }
                 const reader = new FileReader()
-                reader.onload = () => {
+                reader.onload = async () => {
+                  const compressed = await compressImageDataUrl(reader.result, 1000, 750, 0.62)
                   setForm(prev => ({
                     ...prev,
                     mediaError: '',
                     media: {
                       ...(prev.media || {}),
-                      [name]: { name: file.name, type: file.type, size: file.size, dataUrl: reader.result }
+                      [name]: { name: file.name, type: 'image/jpeg', size: Math.round(compressed.length * 0.75), dataUrl: compressed }
                     }
                   }))
                 }
@@ -4139,7 +4263,11 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                 <div key={name} style={{ border: '1px solid #cfcfcf', minHeight: 128, padding: 6, background: '#fff' }}>
                   <div style={{ fontWeight: 700, fontSize: 9, minHeight: 25 }}>{name}</div>
                   <div style={{ height: 75, background: '#f7f7f7', border: '1px solid #e2e2e2', overflow: 'hidden', display: 'grid', placeItems: 'center' }}>
-                    {imageSrc ? <img src={imageSrc} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <span style={{ fontSize: 9, color: '#888' }}>No Image</span>}
+                    {imageSrc ? (
+                      <button type="button" onClick={() => { setPhotoViewer({ name, src: imageSrc }); setPhotoZoom(1) }} title="Click to open photo" style={{ width: '100%', height: '100%', padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in' }}>
+                        <img src={imageSrc} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                      </button>
+                    ) : <span style={{ fontSize: 9, color: '#888' }}>No Image</span>}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 5 }}>
                     <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, cursor: 'pointer' }}>
@@ -4192,17 +4320,29 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                 return
               }
 
-              setForm(prev => ({
-                ...prev,
-                mediaError: '',
-                exteriorVideo: {
-                  name: file.name,
-                  type: file.type,
-                  size: file.size,
-                  duration: Math.round(duration * 10) / 10,
-                  previewUrl
+              ;(async () => {
+                try {
+                  const path = `${caseItem.case_id}/exterior/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+                  const upload = await supabase.storage.from('inspection-media').upload(path, file, { contentType: 'video/mp4', upsert: true })
+                  if (upload.error) throw new Error(upload.error.message)
+                  const { data: publicData } = supabase.storage.from('inspection-media').getPublicUrl(path)
+                  setForm(prev => ({
+                    ...prev,
+                    mediaError: '',
+                    exteriorVideo: {
+                      name: file.name,
+                      type: file.type,
+                      size: file.size,
+                      duration: Math.round(duration * 10) / 10,
+                      previewUrl,
+                      url: publicData?.publicUrl || ''
+                    }
+                  }))
+                } catch (uploadError) {
+                  URL.revokeObjectURL(previewUrl)
+                  setForm(prev => ({ ...prev, mediaError: `Exterior Video: Upload failed — ${uploadError?.message || 'Unknown error'}` }))
                 }
-              }))
+              })()
             }
             testVideo.onerror = () => {
               URL.revokeObjectURL(previewUrl)
@@ -4216,10 +4356,10 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
               <b>Exterior Video (Max 59s)</b>
               <div style={{ marginTop: 5, color: '#666' }}>Only exterior inspection video is allowed. Maximum duration: 59 seconds, MP4, maximum 30MB.</div>
 
-              {videoItem?.previewUrl && (
+              {(videoItem?.previewUrl || videoItem?.url || videoItem?.publicUrl) && (
                 <div style={{ marginTop: 9, border: '1px solid #ddd', background: '#f7f7f7', padding: 7 }}>
                   <video
-                    src={videoItem.previewUrl}
+                    src={videoItem.previewUrl || videoItem.url || videoItem.publicUrl}
                     controls
                     preload="metadata"
                     style={{ width: '100%', maxHeight: 280, display: 'block', background: '#111' }}
@@ -4227,6 +4367,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                   <div style={{ marginTop: 5, fontSize: 9, color: '#555' }}>
                     {videoItem.name} · {videoItem.duration}s · {(videoItem.size / (1024 * 1024)).toFixed(1)} MB
                   </div>
+                  {(videoItem.url || videoItem.publicUrl) && <a href={videoItem.url || videoItem.publicUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 5, fontSize: 10, color: '#1d4ed8', fontWeight: 700 }}>▶ Play / Open Video</a>}
                 </div>
               )}
 
@@ -4247,13 +4388,8 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
 
         {['Pricing', 'Report Generated'].includes(mode) && section('E', 'Pricing',
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 24, rowGap: 1 }}>
-            {textField('Assessed Value', 'assessed_value')}
-            {textField('Market Value', 'market_value')}
-            {textField('Recommended Value', 'recommended_value')}
-            {textField('Salvage Value', 'salvage_value')}
-            {textField('Repair Estimate', 'repair_estimate')}
-            {textField('Pricing Remarks', 'pricing_remarks')}
-            {textField('Final Observations', 'final_observations')}
+            {textField('Valuation Price', 'valuation_price', mode === 'Report Generated')}
+            {textField('Pricing Remarks', 'pricing_remarks', mode === 'Report Generated')}
           </div>
         )}
 
@@ -4295,6 +4431,26 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
           <span>Certificate No.: {String(caseItem.case_id || '').replace(/^CASE-/, '')}</span>
           <span>CarDekho INSPECTION</span>
         </div>
+
+      {photoViewer && (
+        <div onClick={() => setPhotoViewer(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div onClick={e => e.stopPropagation()} style={{ position: 'relative', width: 'min(95vw, 1100px)', height: 'min(90vh, 800px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <button type="button" onClick={() => setPhotoViewer(null)} style={{ position: 'absolute', top: 0, right: 0, zIndex: 2, width: 34, height: 34, borderRadius: '50%', border: 'none', background: '#fff', color: '#111', fontSize: 22, cursor: 'pointer' }}>×</button>
+            <div style={{ color: '#fff', fontWeight: 700, marginBottom: 8 }}>{photoViewer.name}</div>
+            <div onWheel={e => { if (['TPA QC','QC','QC Hold'].includes(mode)) { e.preventDefault(); setPhotoZoom(z => Math.max(0.5, Math.min(3, Number((z + (e.deltaY < 0 ? 0.15 : -0.15)).toFixed(2))))) } }} style={{ maxWidth: '100%', maxHeight: 'calc(100% - 70px)', overflow: 'auto', background: '#111', padding: 10, cursor: ['TPA QC','QC','QC Hold'].includes(mode) ? 'zoom-in' : 'default' }}>
+              <img src={photoViewer.src} alt={photoViewer.name} style={{ maxWidth: 'none', width: `${Math.round(700 * photoZoom)}px`, height: 'auto', display: 'block' }} />
+            </div>
+            {['TPA QC','QC','QC Hold'].includes(mode) && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button type="button" onClick={() => setPhotoZoom(z => Math.min(3, Number((z + 0.25).toFixed(2))))}>Zoom In +</button>
+                <button type="button" onClick={() => setPhotoZoom(z => Math.max(0.5, Number((z - 0.25).toFixed(2))))}>Zoom Out −</button>
+                <button type="button" onClick={() => setPhotoZoom(1)}>Reset</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       </div>
     </div>
   )
