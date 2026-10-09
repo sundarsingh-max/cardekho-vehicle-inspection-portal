@@ -1247,16 +1247,31 @@ function App() {
     if (!item) return
     setActionSaving(true); setActionError('')
     try {
-      const finalForm = pdfMeta ? { ...tpaQcForm, pdf_url: pdfMeta.pdfUrl, pdf_size: pdfMeta.pdfSize, pdf_generated_at: new Date().toISOString() } : tpaQcForm
+      // A case must not be marked completed unless the PDF was generated and uploaded.
+      if (!pdfMeta?.pdfUrl) {
+        throw new Error('PDF was not generated or uploaded. The case remains in Pricing. Please retry Final Submit.')
+      }
+      const finalForm = {
+        ...tpaQcForm,
+        pdf_url: pdfMeta.pdfUrl,
+        pdf_size: pdfMeta.pdfSize || null,
+        pdf_generated_at: pdfMeta.pdfGeneratedAt || new Date().toISOString()
+      }
       setTpaQcForm(finalForm)
       await persistMasterInspectionReport(item, finalForm, 'Pricing', true)
       const { error } = await supabase.from('cases').update({ status: 'COMPLETED' }).eq('id', item.id).eq('status', 'PRICING')
       if (error) throw new Error(error.message)
-      await supabase.from('audit_trail').insert({ case_id: item.case_id, action: 'Final Submitted / Report Generated', stage: 'Pricing', old_status: 'PRICING', new_status: 'COMPLETED', remarks: 'Pricing final submitted and PDF generated.', user_id: null, user_name: 'SS Sundar Singh', role: 'Admin' })
-      await loadCases(); setTpaQcCase({ ...item, status: 'COMPLETED' })
-      setTpaQcMessage('Final report generated successfully. Download the PDF or copy the report URL below.')
-    } catch (error) { setActionError(error?.message || 'Unable to generate final report.') }
-    finally { setActionSaving(false) }
+      await supabase.from('audit_trail').insert({ case_id: item.case_id, action: 'Final Submitted / Report Generated', stage: 'Pricing', old_status: 'PRICING', new_status: 'COMPLETED', remarks: 'Pricing final submitted; PDF generated and uploaded successfully.', user_id: null, user_name: 'SS Sundar Singh', role: 'Admin' })
+      await loadCases()
+      setTpaQcCase({ ...item, status: 'COMPLETED' })
+      setTpaQcMessage('PDF generated and uploaded successfully. Report is ready.')
+      // Open the report itself so PDF actions are available inside the report, not on the list page.
+      setActive('Report Generated')
+    } catch (error) {
+      setActionError(error?.message || 'Unable to generate final report. The case has not been marked completed.')
+    } finally {
+      setActionSaving(false)
+    }
   }
 
   async function reassignCaseToTpa() {
@@ -2707,7 +2722,7 @@ function App() {
         ) : active === 'Pricing' ? (
           <TpaQcReport mode="Pricing" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Pricing')} onSave={() => tpaQcCase && persistMasterInspectionReport(tpaQcCase, tpaQcForm, 'Pricing', true)} onSubmit={(meta) => tpaQcCase && pricingFinalSubmit(tpaQcCase, meta)} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
         ) : active === 'Report Generated' ? (
-          <TpaQcReport mode="Report Generated" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Report Generated')} onSave={(valueOverride) => tpaQcCase && persistMasterInspectionReport(tpaQcCase, valueOverride || tpaQcForm, 'Report Generated', true)} onSubmit={() => {}} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
+          <TpaQcReport mode="Report Generated" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Report Generated')} onSave={(valueOverride) => tpaQcCase && persistMasterInspectionReport(tpaQcCase, valueOverride || tpaQcForm, 'Report Generated', true)} onSubmit={() => {}} onRemarks={item => openRemarkCase(item || tpaQcCase)} onReject={item => openRejectCase(item || tpaQcCase)} onHistory={item => openHistory(item || tpaQcCase)} onHold={() => {}} />
         ) : (
 
           <section className="panel empty">
@@ -3739,6 +3754,30 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
   const [pdfGenerating, setPdfGenerating] = useState(false)
   const [pdfMessage, setPdfMessage] = useState('')
   const [reportEditMode, setReportEditMode] = useState(mode !== 'Report Generated')
+  const [reportLinks, setReportLinks] = useState({})
+
+  useEffect(() => {
+    if (caseItem || mode !== 'Report Generated' || !cases.length) return
+    let cancelled = false
+    const caseIds = cases
+      .filter(item => ['COMPLETED', 'REPORT_GENERATED'].includes(String(item.status || '').trim().toUpperCase().replace(/-/g, '_').replace(/\s+/g, '_')))
+      .map(item => item.case_id)
+      .filter(Boolean)
+    if (!caseIds.length) { setReportLinks({}); return }
+    supabase.from('inspection_reports').select('case_id, report_data').in('case_id', caseIds)
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (error) { console.warn('Unable to load generated PDF links:', error.message); return }
+        const next = {}
+        ;(data || []).forEach(row => {
+          const report = row.report_data || {}
+          if (row.case_id && report.pdf_url) next[String(row.case_id)] = report.pdf_url
+        })
+        setReportLinks(next)
+      })
+      .catch(error => { if (!cancelled) console.warn('Unable to load generated PDF links:', error) })
+    return () => { cancelled = true }
+  }, [caseItem, mode, cases])
 
   if (!caseItem) {
     const normalize = value => String(value || '').trim().toUpperCase().replace(/-/g, '_').replace(/\s+/g, '_')
@@ -3787,8 +3826,27 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                     <td style={{ padding: '11px 8px' }}>{[item.make, item.model, item.variant].filter(Boolean).join(' ') || '—'}</td>
                     <td style={{ padding: '11px 8px' }}>{item.assigned_tpa_name || '—'}</td>
                     <td style={{ padding: '11px 8px' }}><span style={{ padding: '4px 8px', borderRadius: 999, background: mode === 'Report Generated' ? '#DCFCE7' : '#E0F2F1', color: mode === 'Report Generated' ? '#166534' : '#0f766e', fontSize: 11, fontWeight: 700 }}>{mode === 'Report Generated' ? 'REPORT GENERATED' : mode}</span></td>
-                    <td style={{ padding: '11px 8px' }}>
-                      <button type="button" className="primary" onClick={() => onOpenCase(item)}>Open {mode}</button>
+                    <td style={{ padding: '11px 8px', minWidth: mode === 'Report Generated' ? 440 : 150 }}>
+                      {mode === 'Report Generated' ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                          <button type="button" className="primary" onClick={() => onOpenCase(item)}>Edit / Open Report</button>
+                          <button type="button" onClick={() => onOpenCase(item)} title="Open the report to regenerate and save a new PDF">Regenerate PDF</button>
+                          {reportLinks[String(item.case_id)] ? (
+                            <>
+                              <a href={reportLinks[String(item.case_id)]} download={`CarDekho_${item.case_id}_Inspection_Report.pdf`} style={{ display: 'inline-flex', alignItems: 'center', padding: '7px 9px', border: '1px solid #16a34a', background: '#f0fdf4', color: '#15803d', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Download PDF</a>
+                              <a href={reportLinks[String(item.case_id)]} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', padding: '7px 9px', border: '1px solid #1d4ed8', background: '#eff6ff', color: '#1d4ed8', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Open PDF</a>
+                              <button type="button" onClick={async () => { const url = reportLinks[String(item.case_id)]; try { await navigator.clipboard.writeText(url); window.alert('Report URL copied.') } catch { window.prompt('Copy report URL:', url) } }}>Copy Report URL</button>
+                            </>
+                          ) : (
+                            <button type="button" onClick={() => onOpenCase(item)} title="Open the report and generate/upload its PDF">Generate PDF</button>
+                          )}
+                          <button type="button" onClick={() => onRemarks?.(item)}>Remarks</button>
+                          <button type="button" onClick={() => onReject?.(item)}>Reject</button>
+                          <button type="button" onClick={() => onHistory?.(item)}>History</button>
+                        </div>
+                      ) : (
+                        <button type="button" className="primary" onClick={() => onOpenCase(item)}>Open {mode}</button>
+                      )}
                     </td>
                   </tr>
                 ))}
