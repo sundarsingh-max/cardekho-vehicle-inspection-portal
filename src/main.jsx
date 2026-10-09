@@ -1078,6 +1078,82 @@ function App() {
     }
   }
 
+  async function recoverCaseMediaFromStorage(caseId, savedForm = {}) {
+    // Recovery helper: Storage files can remain even when report_data.photos/videos references are empty.
+    const recovered = { ...(savedForm || {}), media: { ...((savedForm || {}).media || {}) } }
+    const bucket = supabase.storage.from('inspection-media')
+    const files = []
+    const queue = [String(caseId)]
+    const visited = new Set()
+    while (queue.length) {
+      const prefix = queue.shift()
+      if (visited.has(prefix)) continue
+      visited.add(prefix)
+      const { data, error } = await bucket.list(prefix, { limit: 100, sortBy: { column: 'name', order: 'asc' } })
+      if (error) {
+        console.warn('Media recovery list failed for', prefix, error.message)
+        continue
+      }
+      for (const entry of data || []) {
+        if (!entry?.name) continue
+        const path = `${prefix}/${entry.name}`
+        const isFolder = !entry.id && !entry.metadata && !/\.(mp4|mov|jpg|jpeg|png|webp|heic)$/i.test(entry.name)
+        if (isFolder) queue.push(path)
+        else files.push({ path, entry })
+      }
+    }
+
+    const normalizeMediaKey = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const photoAliases = {
+      'Profile Picture': ['profilepicture'], 'Right View': ['rightview'], 'Right Quarter Panel': ['rightquarterpanel'],
+      'Rear View': ['rearview'], 'Left Quarter Panel': ['leftquarterpanel'], 'Left View': ['leftview'],
+      'Left Side Profile Pic': ['leftsideprofilepic'], 'Front View': ['frontview'],
+      'Engine Compartment 1': ['enginecompartment1'], 'Engine Compartment 2': ['enginecompartment2'], 'Engine Compartment 3': ['enginecompartment3'],
+      'Boot / Dicky': ['bootdicky','boot','dicky'], 'Front Windscreen': ['frontwindscreen'],
+      'Windscreen - Interior (from rear seat)': ['windscreeninteriorfromrearseat','windscreeninterior'],
+      'Dashboard': ['dashboard'], 'Odometer Reading': ['odometerreading','odometer'],
+      'ABC Pedals (from driver seat)': ['abcpedalsfromdriverseat','abcpedals'], 'Selfie with Vehicle': ['selfiewithvehicle'],
+      'Other Images 1': ['otherimages1'], 'Other Images 2': ['otherimages2'], 'Other Images 3': ['otherimages3'],
+      'VIN Plate Photo': ['vinplatephoto','vinplate'], 'Chassis Imprint': ['chassisimprint'], 'Pencil Tracing': ['penciltracing']
+    }
+
+    const savedVideo = recovered.exteriorVideo
+    const storedVideos = files.filter(file => /\.mp4$/i.test(file.path) && /exterior/i.test(file.path))
+    if (!savedVideo?.url && !savedVideo?.publicUrl && storedVideos.length) {
+      const chosen = storedVideos.sort((a, b) => {
+        const at = Number(a.entry?.created_at ? Date.parse(a.entry.created_at) : 0)
+        const bt = Number(b.entry?.created_at ? Date.parse(b.entry.created_at) : 0)
+        return bt - at
+      })[0]
+      const { data: publicData } = bucket.getPublicUrl(chosen.path)
+      recovered.exteriorVideo = {
+        name: chosen.entry.name,
+        type: 'video/mp4',
+        size: Number(chosen.entry.metadata?.size || 0),
+        duration: Number(savedVideo?.duration || 0),
+        url: publicData?.publicUrl || '',
+        publicUrl: publicData?.publicUrl || '',
+        storagePath: chosen.path,
+        recoveredFromStorage: true
+      }
+    }
+
+    for (const [label, aliases] of Object.entries(photoAliases)) {
+      const existing = recovered.media?.[label]
+      if (existing && (typeof existing === 'string' || existing.dataUrl || existing.url || existing.publicUrl)) continue
+      const match = files.find(file => {
+        if (!/\.(jpg|jpeg|png|webp)$/i.test(file.path)) return false
+        const key = normalizeMediaKey(file.path.split('/').slice(1, -1).join(' ') + ' ' + file.entry.name)
+        return aliases.some(alias => key.includes(alias))
+      })
+      if (match) {
+        const { data: publicData } = bucket.getPublicUrl(match.path)
+        recovered.media[label] = { name: match.entry.name, type: match.entry.metadata?.mimetype || 'image/jpeg', size: Number(match.entry.metadata?.size || 0), url: publicData?.publicUrl || '', publicUrl: publicData?.publicUrl || '', storagePath: match.path, recoveredFromStorage: true }
+      }
+    }
+    return recovered
+  }
+
   async function loadMasterInspectionReport(item) {
     setReportHydrated(false)
     if (!item?.case_id) return buildTpaQcForm(item)
@@ -1085,11 +1161,11 @@ function App() {
       const { data, error } = await supabase.from('inspection_reports').select('report_data, updated_at').eq('case_id', item.case_id).order('updated_at', { ascending: false }).limit(1)
       if (error) {
         console.warn('Inspection report load:', error.message)
-        return buildTpaQcForm(item)
+        return recoverCaseMediaFromStorage(item.case_id, buildTpaQcForm(item))
       }
       const saved = data?.[0]?.report_data
-      if (saved) return { ...buildTpaQcForm(item), ...saved, detailed: saved.detailed || {}, media: saved.media || {} }
-      return buildTpaQcForm(item)
+      const merged = saved ? { ...buildTpaQcForm(item), ...saved, detailed: saved.detailed || {}, media: saved.media || {} } : buildTpaQcForm(item)
+      return await recoverCaseMediaFromStorage(item.case_id, merged)
     } finally { setReportHydrated(true) }
   }
 
@@ -4428,7 +4504,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
             {media.map(name => {
               const mediaItem = form.media?.[name]
-              const imageSrc = typeof mediaItem === 'string' ? mediaItem : mediaItem?.dataUrl
+              const imageSrc = typeof mediaItem === 'string' ? mediaItem : (mediaItem?.dataUrl || mediaItem?.url || mediaItem?.publicUrl)
               const imageName = typeof mediaItem === 'object' ? mediaItem?.name : ''
 
               const handlePhotoUpload = event => {
@@ -4571,7 +4647,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                     style={{ width: '100%', maxHeight: 280, display: 'block', background: '#111' }}
                   />
                   <div style={{ marginTop: 5, fontSize: 9, color: '#555' }}>
-                    {videoItem.name} · {videoItem.duration}s · {(videoItem.size / (1024 * 1024)).toFixed(1)} MB
+                    {videoItem.name || 'Exterior Video'} · {videoItem.duration ? `${videoItem.duration}s · ` : ''}{(Number(videoItem.size || 0) / (1024 * 1024)).toFixed(1)} MB{videoItem.recoveredFromStorage ? ' · Recovered from Storage' : ''}
                   </div>
                   {(videoItem.url || videoItem.publicUrl) && <a href={videoItem.url || videoItem.publicUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 5, fontSize: 10, color: '#1d4ed8', fontWeight: 700 }}>▶ Play / Open Video</a>}
                 </div>
