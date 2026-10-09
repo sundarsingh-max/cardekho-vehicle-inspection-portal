@@ -4073,7 +4073,16 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
           el.style.objectFit = 'contain'
         }
       })
-      clone.querySelectorAll('button, input, select, textarea, [data-no-pdf="true"]').forEach(el => el.remove())
+      // Photo previews are wrapped in buttons for click-to-zoom. Unwrap those
+      // buttons before PDF capture so the IMG elements remain in the report.
+      clone.querySelectorAll('button').forEach(button => {
+        if (button.querySelector('img')) {
+          button.replaceWith(...Array.from(button.childNodes))
+        } else {
+          button.remove()
+        }
+      })
+      clone.querySelectorAll('input, select, textarea, [data-no-pdf="true"]').forEach(el => el.remove())
       printHost.appendChild(clone)
       document.body.appendChild(printHost)
 
