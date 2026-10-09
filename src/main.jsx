@@ -1181,7 +1181,12 @@ function App() {
         if (video) merged.exteriorVideo = typeof video === 'string' ? { url: video, publicUrl: video, name: 'Exterior Video', type: 'video/mp4' } : { ...video, url: video.url || video.publicUrl || '' }
       }
       return await recoverCaseMediaFromStorage(item.case_id, merged)
-    } finally { setReportHydrated(true) }
+    } catch (error) {
+      console.error('Master report load error:', error)
+      // Return lead-derived fields if the report query fails, but do not mark
+      // the form hydrated until openReportCase has installed this exact result.
+      return await recoverCaseMediaFromStorage(item.case_id, buildTpaQcForm(item))
+    }
   }
 
   function sanitizeReportForm(value) {
@@ -1236,11 +1241,18 @@ function App() {
   }
 
   async function openReportCase(item, stage) {
+    // Prevent the autosave effect from saving the previous case's/stale form
+    // while the selected case's saved report is still loading.
+    setReportHydrated(false)
     setTpaQcCase(item)
     setActive(stage)
     setTpaQcMessage('')
+    setActionError('')
+    setTpaQcForm({})
     const loaded = await loadMasterInspectionReport(item)
     setTpaQcForm(loaded)
+    // Mark hydrated only after the loaded form has been placed into state.
+    setReportHydrated(true)
   }
 
   function openTpaQcCase(item) { openReportCase(item, 'TPA QC') }
