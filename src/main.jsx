@@ -1118,8 +1118,8 @@ function App() {
     }
 
     const savedVideo = recovered.exteriorVideo
-    const storedVideos = files.filter(file => /\.mp4$/i.test(file.path) && /exterior/i.test(file.path))
-    if (!savedVideo?.url && !savedVideo?.publicUrl && storedVideos.length) {
+    const storedVideos = files.filter(file => /\.(mp4|mov|webm|m4v)$/i.test(file.path) && /exterior/i.test(file.path))
+    if (!(savedVideo?.url || savedVideo?.publicUrl || savedVideo?.signedUrl) && storedVideos.length) {
       const chosen = storedVideos.sort((a, b) => {
         const at = Number(a.entry?.created_at ? Date.parse(a.entry.created_at) : 0)
         const bt = Number(b.entry?.created_at ? Date.parse(b.entry.created_at) : 0)
@@ -1158,13 +1158,28 @@ function App() {
     setReportHydrated(false)
     if (!item?.case_id) return buildTpaQcForm(item)
     try {
-      const { data, error } = await supabase.from('inspection_reports').select('report_data, updated_at').eq('case_id', item.case_id).order('updated_at', { ascending: false }).limit(1)
+      const { data, error } = await supabase.from('inspection_reports').select('report_data, photos, videos, updated_at').eq('case_id', item.case_id).order('updated_at', { ascending: false }).limit(1)
       if (error) {
         console.warn('Inspection report load:', error.message)
         return recoverCaseMediaFromStorage(item.case_id, buildTpaQcForm(item))
       }
-      const saved = data?.[0]?.report_data
-      const merged = saved ? { ...buildTpaQcForm(item), ...saved, detailed: saved.detailed || {}, media: saved.media || {} } : buildTpaQcForm(item)
+      const row = data?.[0]
+      const saved = row?.report_data && typeof row.report_data === 'object' ? row.report_data : {}
+      const merged = { ...buildTpaQcForm(item), ...saved }
+      merged.detailed = saved.detailed && typeof saved.detailed === 'object' ? saved.detailed : {}
+      // Older app versions stored media separately from report_data. Merge both formats.
+      const savedPhotos = row?.photos && typeof row.photos === 'object' ? row.photos : {}
+      const savedVideos = row?.videos && typeof row.videos === 'object' ? row.videos : {}
+      merged.media = { ...(savedPhotos.media || {}), ...savedPhotos, ...(saved.media || {}) }
+      delete merged.media.media
+      if (!merged.exteriorVideo) {
+        const video = savedVideos.exteriorVideo || savedVideos['Exterior Video'] || savedVideos.exterior || savedVideos.video || null
+        if (video) merged.exteriorVideo = typeof video === 'string' ? { url: video, publicUrl: video, name: 'Exterior Video', type: 'video/mp4' } : video
+      }
+      if (!merged.exteriorVideo && Array.isArray(savedVideos)) {
+        const video = savedVideos.find(v => /exterior/i.test(`${v?.category || ''} ${v?.name || ''} ${v?.path || ''}`))
+        if (video) merged.exteriorVideo = typeof video === 'string' ? { url: video, publicUrl: video, name: 'Exterior Video', type: 'video/mp4' } : { ...video, url: video.url || video.publicUrl || '' }
+      }
       return await recoverCaseMediaFromStorage(item.case_id, merged)
     } finally { setReportHydrated(true) }
   }
@@ -1181,11 +1196,34 @@ function App() {
 
   async function persistMasterInspectionReport(item, value, stage, writeAudit = true) {
     if (!item?.case_id) return
-    const payload = { case_id: item.case_id, report_data: sanitizeReportForm(value), updated_at: new Date().toISOString() }
-    const { data: existing, error: findError } = await supabase.from('inspection_reports').select('id').eq('case_id', item.case_id).limit(1)
+    const { data: existing, error: findError } = await supabase.from('inspection_reports').select('id, report_data, photos, videos').eq('case_id', item.case_id).order('updated_at', { ascending: false }).limit(1)
     if (findError) throw new Error(findError.message)
-    if (existing?.[0]?.id) {
-      const { error } = await supabase.from('inspection_reports').update(payload).eq('id', existing[0].id)
+    const currentRow = existing?.[0] || null
+    const incoming = sanitizeReportForm(value)
+    const previous = currentRow?.report_data && typeof currentRow.report_data === 'object' ? currentRow.report_data : {}
+    // Never let an empty autosave erase a populated value saved by an earlier stage.
+    const mergePreservingSaved = (oldValue, newValue) => {
+      if (newValue === undefined || newValue === null || newValue === '') return oldValue ?? newValue
+      if (Array.isArray(newValue)) return newValue.length ? newValue : (Array.isArray(oldValue) && oldValue.length ? oldValue : newValue)
+      if (typeof newValue === 'object') {
+        const out = { ...(oldValue && typeof oldValue === 'object' && !Array.isArray(oldValue) ? oldValue : {}) }
+        for (const [key, val] of Object.entries(newValue)) out[key] = mergePreservingSaved(out[key], val)
+        return out
+      }
+      return newValue
+    }
+    const mergedReport = mergePreservingSaved(previous, incoming)
+    const mediaFromRow = currentRow?.photos && typeof currentRow.photos === 'object' ? currentRow.photos : {}
+    const videosFromRow = currentRow?.videos && typeof currentRow.videos === 'object' ? currentRow.videos : {}
+    const payload = {
+      case_id: item.case_id,
+      report_data: mergedReport,
+      photos: { ...mediaFromRow, ...(mergedReport.media || {}) },
+      videos: { ...videosFromRow, ...(mergedReport.exteriorVideo ? { exteriorVideo: mergedReport.exteriorVideo, 'Exterior Video': mergedReport.exteriorVideo } : {}) },
+      updated_at: new Date().toISOString()
+    }
+    if (currentRow?.id) {
+      const { error } = await supabase.from('inspection_reports').update(payload).eq('id', currentRow.id)
       if (error) throw new Error(error.message)
     } else {
       const { error } = await supabase.from('inspection_reports').insert(payload)
@@ -4100,7 +4138,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
           pdf.addImage(imgData, 'JPEG', margin, margin, usableWidth, imgHeight, undefined, 'FAST')
           page += 1
         }
-        const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl
+        const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl || form.exteriorVideo?.signedUrl
         if (videoUrl) {
           pdf.addPage()
           pdf.setFontSize(12)
