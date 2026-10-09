@@ -129,35 +129,38 @@ function App() {
     setLoading(true)
     setDbError('')
 
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 12000)
+    // Do not abort Supabase requests with AbortController. In this portal,
+    // aborted requests were producing "signal is aborted without reason"
+    // and incorrectly clearing the dashboard counts to zero.
+    let lastError = null
 
-    try {
-      const { data, error } = await supabase
-        .from('cases')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(1000)
-        .abortSignal(controller.signal)
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const { data, error } = await supabase
+          .from('cases')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(1000)
 
-      if (error) {
-        console.error('Supabase cases error:', error)
-        setDbError(error.message || 'Unable to load cases from Supabase.')
-        setCases([])
-      } else {
+        if (error) throw new Error(error.message || 'Unable to load cases from Supabase.')
+
         setCases(data || [])
+        setDbError('')
+        setLoading(false)
+        return
+      } catch (error) {
+        lastError = error
+        console.error(`Supabase cases request failed (attempt ${attempt}/3):`, error)
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, attempt * 1000))
+        }
       }
-    } catch (error) {
-      console.error('Supabase cases request failed:', error)
-      const message = error?.name === 'AbortError'
-        ? 'Supabase connection timed out after 12 seconds. Please click Refresh and try again.'
-        : (error?.message || 'Unable to load cases from Supabase.')
-      setDbError(message)
-      setCases([])
-    } finally {
-      clearTimeout(timeoutId)
-      setLoading(false)
     }
+
+    // Keep the last successfully loaded cases on screen rather than replacing
+    // the counts with zero when a temporary network failure occurs.
+    setDbError(`Database connection failed after 3 attempts: ${lastError?.message || 'Please check your connection and retry.'}`)
+    setLoading(false)
   }
 
   async function loadTpas() {
