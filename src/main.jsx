@@ -3911,7 +3911,8 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
   const generateInspectionPdf = async () => {
     if (!reportRef.current) throw new Error('Report is not ready for PDF generation.')
     setPdfGenerating(true)
-    setPdfMessage('Preparing PDF engine...')
+    setPdfMessage('Preparing complete report and photos...')
+    let printHost = null
     try {
       const html2canvasUrls = [
         'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
@@ -3921,114 +3922,140 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
         'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
       ]
-
-      let engineLoaded = false
-      let lastEngineError = null
+      let loaded = false
+      let lastError = null
       for (const url of html2canvasUrls) {
-        try { await loadExternalScript(url); engineLoaded = true; break } catch (e) { lastEngineError = e }
+        try { await loadExternalScript(url); loaded = true; break } catch (e) { lastError = e }
       }
-      if (!engineLoaded) throw new Error(`Unable to load PDF image engine. ${lastEngineError?.message || ''}`.trim())
-
-      engineLoaded = false
+      if (!loaded) throw new Error(`Unable to load image renderer. ${lastError?.message || ''}`)
+      loaded = false
       for (const url of jspdfUrls) {
-        try { await loadExternalScript(url); engineLoaded = true; break } catch (e) { lastEngineError = e }
+        try { await loadExternalScript(url); loaded = true; break } catch (e) { lastError = e }
       }
-      if (!engineLoaded) throw new Error(`Unable to load PDF engine. ${lastEngineError?.message || ''}`.trim())
-
+      if (!loaded) throw new Error(`Unable to load PDF engine. ${lastError?.message || ''}`)
       const JsPdf = window.jspdf?.jsPDF
-      if (!JsPdf || !window.html2canvas) throw new Error('PDF engine could not be loaded in this browser.')
+      if (!JsPdf || !window.html2canvas) throw new Error('PDF libraries are unavailable.')
 
-      const node = reportRef.current
+      // Render a fixed-width clone so wide two-column tables and photos are not clipped by the screen viewport.
+      const source = reportRef.current
+      printHost = document.createElement('div')
+      printHost.style.cssText = 'position:fixed;left:-20000px;top:0;width:794px;background:#fff;z-index:-1;overflow:visible;'
+      const clone = source.cloneNode(true)
+      clone.style.width = '794px'
+      clone.style.maxWidth = '794px'
+      clone.style.minWidth = '794px'
+      clone.style.height = 'auto'
+      clone.style.maxHeight = 'none'
+      clone.style.overflow = 'visible'
+      clone.style.boxSizing = 'border-box'
+      clone.querySelectorAll('*').forEach(el => {
+        el.style.maxHeight = 'none'
+        if (['auto', 'scroll', 'hidden', 'clip'].includes(getComputedStyle(el).overflow)) {
+          el.style.overflow = 'visible'
+        }
+        if (el.tagName === 'IMG') {
+          el.style.maxWidth = '100%'
+          el.style.height = 'auto'
+          el.style.objectFit = 'contain'
+        }
+      })
+      clone.querySelectorAll('button, input, select, textarea, [data-no-pdf="true"]').forEach(el => el.remove())
+      printHost.appendChild(clone)
+      document.body.appendChild(printHost)
+
+      // Wait for every photo to load/decode before capturing the report.
+      const imgs = Array.from(clone.querySelectorAll('img'))
+      await Promise.all(imgs.map(img => new Promise(resolve => {
+        if (img.complete && img.naturalWidth > 0) {
+          if (img.decode) img.decode().catch(() => {}).finally(resolve)
+          else resolve()
+          return
+        }
+        const done = () => resolve()
+        img.addEventListener('load', done, { once: true })
+        img.addEventListener('error', done, { once: true })
+        setTimeout(done, 15000)
+      })))
+
       const attempts = [
-        { scale: 0.62 },
-        { scale: 0.50 },
-        { scale: 0.42 },
-        { scale: 0.35 },
-        { scale: 0.28 },
-        { scale: 0.22 }
+        { scale: 0.78, quality: 0.78 },
+        { scale: 0.64, quality: 0.70 },
+        { scale: 0.52, quality: 0.62 },
+        { scale: 0.42, quality: 0.55 }
       ]
       let finalBlob = null
       let finalDoc = null
-
       for (const attempt of attempts) {
-        setPdfMessage(`Rendering PDF (${Math.round(attempt.scale * 100)}% quality)...`)
-        const doc = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true })
-        await new Promise((resolve, reject) => {
-          let settled = false
-          const timer = setTimeout(() => {
-            if (!settled) { settled = true; reject(new Error('PDF rendering timed out. Please try again or reduce/replace very large photos.')) }
-          }, 90000)
-
-          try {
-            doc.html(node, {
-              x: 5,
-              y: 5,
-              width: 200,
-              windowWidth: Math.max(node.scrollWidth || 1, 900),
-              autoPaging: 'text',
-              margin: [5, 5, 5, 5],
-              html2canvas: {
-                scale: attempt.scale,
-                useCORS: true,
-                allowTaint: false,
-                backgroundColor: '#ffffff',
-                imageTimeout: 20000,
-                logging: false,
-                removeContainer: true
-              },
-              callback: pdf => {
-                if (settled) return
-                try {
-                  const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl
-                  if (videoUrl) {
-                    pdf.addPage()
-                    pdf.setFontSize(12)
-                    pdf.setTextColor(0, 0, 0)
-                    pdf.text('Exterior Inspection Video', 15, 20)
-                    pdf.setFontSize(10)
-                    pdf.setTextColor(30, 80, 180)
-                    pdf.textWithLink('Play / Open Video', 15, 32, { url: videoUrl })
-                    pdf.setTextColor(0, 0, 0)
-                  }
-                  const blob = pdf.output('blob')
-                  if (!blob || !blob.size) throw new Error('Generated PDF is empty.')
-                  finalDoc = pdf
-                  finalBlob = blob
-                  settled = true
-                  clearTimeout(timer)
-                  resolve()
-                } catch (e) {
-                  settled = true
-                  clearTimeout(timer)
-                  reject(e)
-                }
-              }
-            })
-          } catch (e) {
-            settled = true
-            clearTimeout(timer)
-            reject(e)
-          }
+        setPdfMessage(`Rendering complete report and photos (${Math.round(attempt.scale * 100)}% quality)...`)
+        const canvas = await window.html2canvas(clone, {
+          scale: attempt.scale,
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: '#ffffff',
+          imageTimeout: 30000,
+          logging: false,
+          width: 794,
+          windowWidth: 794,
+          scrollX: 0,
+          scrollY: 0
         })
-        if (finalBlob && finalBlob.size <= 2 * 1024 * 1024) break
+        if (!canvas.width || !canvas.height) throw new Error('Report rendering returned an empty page.')
+        const pdf = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true })
+        const margin = 7
+        const pageWidth = 210
+        const pageHeight = 297
+        const usableWidth = pageWidth - margin * 2
+        const usableHeight = pageHeight - margin * 2
+        const pxPerMm = canvas.width / usableWidth
+        const sliceHeight = Math.max(1, Math.floor(usableHeight * pxPerMm))
+        let page = 0
+        for (let y = 0; y < canvas.height; y += sliceHeight) {
+          if (page > 0) pdf.addPage()
+          const h = Math.min(sliceHeight, canvas.height - y)
+          const slice = document.createElement('canvas')
+          slice.width = canvas.width
+          slice.height = h
+          const ctx = slice.getContext('2d')
+          ctx.fillStyle = '#ffffff'
+          ctx.fillRect(0, 0, slice.width, slice.height)
+          ctx.drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h)
+          const imgData = slice.toDataURL('image/jpeg', attempt.quality)
+          const imgHeight = h / pxPerMm
+          pdf.addImage(imgData, 'JPEG', margin, margin, usableWidth, imgHeight, undefined, 'FAST')
+          page += 1
+        }
+        const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl
+        if (videoUrl) {
+          pdf.addPage()
+          pdf.setFontSize(12)
+          pdf.setTextColor(0, 0, 0)
+          pdf.text('Exterior Inspection Video', 15, 20)
+          pdf.setFontSize(10)
+          pdf.setTextColor(30, 80, 180)
+          pdf.textWithLink('Play / Open Video', 15, 32, { url: videoUrl })
+        }
+        const blob = pdf.output('blob')
+        if (!blob || !blob.size) throw new Error('Generated PDF is empty.')
+        finalBlob = blob
+        finalDoc = pdf
+        if (canvas.toDataURL) canvas.width = 1 // release the large canvas buffer before the next attempt
+        if (finalBlob.size <= 4 * 1024 * 1024) break
       }
-
       if (!finalBlob || !finalDoc) throw new Error('Unable to generate PDF.')
-
       const path = `${caseItem.case_id}/${Date.now()}_inspection_report.pdf`
-      setPdfMessage('Uploading generated PDF to secure report storage...')
-      const upload = await supabase.storage
-        .from('inspection-reports')
-        .upload(path, finalBlob, { contentType: 'application/pdf', upsert: true })
+      setPdfMessage('Uploading complete PDF with photos...')
+      const upload = await supabase.storage.from('inspection-reports').upload(path, finalBlob, {
+        contentType: 'application/pdf',
+        upsert: true
+      })
       if (upload.error) throw new Error(`PDF upload failed: ${upload.error.message}`)
-
       const { data: publicData } = supabase.storage.from('inspection-reports').getPublicUrl(path)
       const pdfUrl = publicData?.publicUrl || ''
-      if (!pdfUrl) throw new Error('PDF was uploaded but a public report URL could not be created.')
-
-      setPdfMessage(`PDF generated successfully (${(finalBlob.size / 1024 / 1024).toFixed(2)} MB).`)
+      if (!pdfUrl) throw new Error('PDF uploaded but report URL could not be created.')
+      setPdfMessage(`Complete PDF generated (${(finalBlob.size / 1024 / 1024).toFixed(2)} MB).`)
       return { pdfUrl, pdfSize: finalBlob.size, pdfGeneratedAt: new Date().toISOString() }
     } finally {
+      if (printHost?.parentNode) printHost.parentNode.removeChild(printHost)
       setPdfGenerating(false)
     }
   }
