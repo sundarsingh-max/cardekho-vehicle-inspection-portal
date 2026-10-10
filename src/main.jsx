@@ -4113,36 +4113,8 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
             const blob = await response.blob()
             const originalName = typeof item === 'object' ? item.name : ''
             const ext = (originalName && /\.[a-z0-9]{2,5}$/i.test(originalName)) ? originalName.split('.').pop() : (blob.type?.split('/')[1] || 'jpg')
-
-            // Keep every image in the downloadable ZIP, as before.
             zip.file(`${String(packed + 1).padStart(2, '0')}_${safeFileName(label)}.${safeFileName(ext)}`, blob)
             packed += 1
-
-            // Also store an individual copy so the PDF's View annotation can use a real HTTPS URL.
-            try {
-              const safeLabel = safeFileName(label)
-              const imagePath = `${caseItem.case_id}/${Date.now()}_${packed}_${safeLabel}.${safeFileName(ext)}`
-              const imageUpload = await supabase.storage.from('inspection-reports').upload(imagePath, blob, {
-                contentType: blob.type || 'image/jpeg',
-                upsert: true
-              })
-              if (imageUpload.error) throw new Error(imageUpload.error.message)
-              const { data: imagePublic } = supabase.storage.from('inspection-reports').getPublicUrl(imagePath)
-              const publicUrl = imagePublic?.publicUrl || ''
-              if (publicUrl && /^https?:\/\//i.test(publicUrl)) {
-                photoPublicUrls[src] = publicUrl
-                if (typeof item === 'object') {
-                  if (item.dataUrl) photoPublicUrls[item.dataUrl] = publicUrl
-                  if (item.url) photoPublicUrls[item.url] = publicUrl
-                  if (item.publicUrl) photoPublicUrls[item.publicUrl] = publicUrl
-                }
-              } else {
-                throw new Error('Could not create a public photo URL.')
-              }
-            } catch (uploadError) {
-              // ZIP creation should still succeed even if an individual photo upload fails.
-              console.warn(`Could not create a public View URL for inspection photo: ${label}`, uploadError)
-            }
           } catch (e) {
             console.warn(`Could not add inspection photo to ZIP: ${label}`, e)
           }
@@ -4212,6 +4184,19 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         el.replaceWith(span)
       })
       clone.querySelectorAll('[data-no-pdf="true"]').forEach(el => el.remove())
+      // Print-only normalization: use a compact report-paper layout and ensure controls
+      // and browser-form affordances never leak into the generated report.
+      const pdfPrintStyle = document.createElement('style')
+      pdfPrintStyle.textContent = `
+        * { box-sizing: border-box !important; }
+        body { margin: 0 !important; }
+        table { width: 100% !important; border-collapse: collapse !important; }
+        th, td { padding: 4px 6px !important; vertical-align: top !important; overflow-wrap: anywhere !important; }
+        img { max-width: 100% !important; }
+        input[type=file], video, button { display: none !important; }
+        a { overflow-wrap: anywhere !important; }
+      `
+      clone.prepend(pdfPrintStyle)
 
       // PDF-only photo-card cleanup: keep the photo heading (e.g. 'Selfie with Vehicle')
       // and the image, but remove the Replace/Upload row and uploaded filename. This only
@@ -4232,6 +4217,16 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
           if (hasUploadControl || looksLikeFilename) child.remove()
         })
       })
+      // Final safeguard for nested photo-card markup: remove file names and action captions
+      // without touching the photo title, the image, or the clickable View link added below.
+      clone.querySelectorAll('*').forEach(el => {
+        if (el.children.length > 0 || el.tagName === 'IMG' || el.tagName === 'A') return
+        const text = (el.textContent || '').trim()
+        if (/^(Replace|Upload|Remove|Replace Video|Upload Exterior Video)$/i.test(text) ||
+            /^(IMG[-_].*\.(jpg|jpeg|png|webp|heic)|.*\.(jpg|jpeg|png|webp|heic))$/i.test(text)) {
+          el.remove()
+        }
+      })
 
       // PDF-only photo cards: enlarge the grid, remove upload/file rows, and add a clickable View label.
       const pdfPhotoTargets = []
@@ -4244,27 +4239,20 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         if (!title || !img) return
         if (!/^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VinPlate Photo|Chassis Imprint|Chassis Number Pencil Tracing)$/i.test(title)) return
         
-// Remove original View anchors that may point to a data:image Base64 URL.
-        card.querySelectorAll('a').forEach(anchor => {
-          const href = anchor.getAttribute('href') || ''
-          const label = (anchor.textContent || '').trim()
-          if (/^data:image\//i.test(href) || /^view$/i.test(label)) anchor.remove()
-        })
+const renderedSrc = img.currentSrc || img.src || img.getAttribute('src') || ''
 
-        const renderedSrc = img.currentSrc || img.src || img.getAttribute('src') || ''
+const matchingMedia = Object.values(form.media || {}).find(item => {
+  if (!item || typeof item !== 'object') return false
+  return item.dataUrl === renderedSrc ||
+    item.url === renderedSrc ||
+    item.publicUrl === renderedSrc
+})
 
-        const matchingMedia = Object.values(form.media || {}).find(item => {
-          if (!item || typeof item !== 'object') return false
-          return item.dataUrl === renderedSrc || item.url === renderedSrc || item.publicUrl === renderedSrc
-        })
-        const mediaSource = matchingMedia
-          ? (matchingMedia.dataUrl || matchingMedia.url || matchingMedia.publicUrl || renderedSrc)
-          : renderedSrc
-        const existingWebUrl = /^https?:\/\//i.test(mediaSource) ? mediaSource : ''
-        const src = photoPublicUrls[renderedSrc] || photoPublicUrls[mediaSource] || existingWebUrl
+const src = matchingMedia
+  ? (matchingMedia.publicUrl || matchingMedia.url || matchingMedia.dataUrl || renderedSrc)
+  : renderedSrc
 
-        // Never embed a data:image Base64 string as a PDF URL annotation.
-        if (!src || !/^https?:\/\//i.test(src)) return
+        if (!src) return
         card.style.setProperty('min-height', '150px', 'important')
         card.style.setProperty('padding', '6px', 'important')
         card.style.setProperty('box-sizing', 'border-box', 'important')
@@ -4386,7 +4374,7 @@ if (exteriorSection?.parentNode) {
         const pageWidth = 210
         const pageHeight = 297
         const usableWidth = pageWidth - margin * 2
-        const usableHeight = pageHeight - margin * 2
+        const usableHeight = pageHeight - margin * 2 - 10
         const pxPerMm = canvas.width / usableWidth
         const sliceHeight = Math.max(1, Math.floor(usableHeight * pxPerMm))
         let page = 0
@@ -4430,6 +4418,20 @@ if (exteriorSection?.parentNode) {
               { url: target.url }
             )
           }
+        }
+        // Consistent printed footer and page numbering on every page. The footer is
+        // vector text (not part of the screenshot), so it remains crisp when zoomed.
+        const totalPages = pdf.getNumberOfPages()
+        for (let pageNo = 1; pageNo <= totalPages; pageNo += 1) {
+          pdf.setPage(pageNo)
+          pdf.setDrawColor(220, 224, 228)
+          pdf.setLineWidth(0.25)
+          pdf.line(margin, pageHeight - 8, pageWidth - margin, pageHeight - 8)
+          pdf.setFont('helvetica', 'normal')
+          pdf.setFontSize(7)
+          pdf.setTextColor(100, 107, 116)
+          pdf.text(`CarDekho | Vehicle Inspection Report | ${String(caseItem.case_id || '')}`, margin, pageHeight - 4)
+          pdf.text(`Page ${pageNo} of ${totalPages}`, pageWidth - margin, pageHeight - 4, { align: 'right' })
         }
         // Keep all media links within the existing Exterior Video section; never
         // append a separate Inspection Media Downloads page.
