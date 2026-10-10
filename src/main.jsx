@@ -3997,21 +3997,21 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                     <td style={{ padding: '11px 8px' }}><span style={{ padding: '4px 8px', borderRadius: 999, background: mode === 'Report Generated' ? '#DCFCE7' : '#E0F2F1', color: mode === 'Report Generated' ? '#166534' : '#0f766e', fontSize: 11, fontWeight: 700 }}>{mode === 'Report Generated' ? 'REPORT GENERATED' : mode}</span></td>
                     <td style={{ padding: '11px 8px', minWidth: mode === 'Report Generated' ? 440 : 150 }}>
                       {mode === 'Report Generated' ? (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                          <button type="button" className="primary" onClick={() => onOpenCase(item)}>Edit / Open Report</button>
-                          <button type="button" onClick={() => onOpenCase(item)} title="Open the report to regenerate and save a new PDF">Regenerate PDF</button>
+                        <div className="report-row-actions">
+                          <button type="button" className="primary report-action" onClick={() => onOpenCase(item)} title="Edit / Open Report" aria-label="Edit / Open Report"><Pencil size={16}/></button>
+                          <button type="button" className="report-action" onClick={() => onOpenCase(item)} title="Regenerate PDF" aria-label="Regenerate PDF"><RefreshCw size={16}/></button>
                           {reportLinks[String(item.case_id)] ? (
                             <>
-                              <a href={reportLinks[String(item.case_id)]} download={`CarDekho_${item.case_id}_Inspection_Report.pdf`} style={{ display: 'inline-flex', alignItems: 'center', padding: '7px 9px', border: '1px solid #16a34a', background: '#f0fdf4', color: '#15803d', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Download PDF</a>
-                              <a href={reportLinks[String(item.case_id)]} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', padding: '7px 9px', border: '1px solid #1d4ed8', background: '#eff6ff', color: '#1d4ed8', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Open PDF</a>
-                              <button type="button" onClick={async () => { const url = reportLinks[String(item.case_id)]; try { await navigator.clipboard.writeText(url); window.alert('Report URL copied.') } catch { window.prompt('Copy report URL:', url) } }}>Copy Report URL</button>
+                              <a className="report-action download" href={reportLinks[String(item.case_id)]} download={`CarDekho_${item.case_id}_Inspection_Report.pdf`} title="Download PDF" aria-label="Download PDF"><Download size={16}/></a>
+                              <a className="report-action open" href={reportLinks[String(item.case_id)]} target="_blank" rel="noreferrer" title="Open PDF" aria-label="Open PDF"><ExternalLink size={16}/></a>
+                              <button type="button" className="report-action" onClick={async () => { const url = reportLinks[String(item.case_id)]; try { await navigator.clipboard.writeText(url); window.alert('Report URL copied.') } catch { window.prompt('Copy report URL:', url) } }} title="Copy Report URL" aria-label="Copy Report URL"><Copy size={16}/></button>
                             </>
                           ) : (
-                            <button type="button" onClick={() => onOpenCase(item)} title="Open the report and generate/upload its PDF">Generate PDF</button>
+                            <button type="button" className="report-action" onClick={() => onOpenCase(item)} title="Generate PDF" aria-label="Generate PDF"><FileDown size={16}/></button>
                           )}
-                          <button type="button" onClick={() => onRemarks?.(item)}>Remarks</button>
-                          <button type="button" onClick={() => onReject?.(item)}>Reject</button>
-                          <button type="button" onClick={() => onHistory?.(item)}>History</button>
+                          <button type="button" className="report-action" onClick={() => onRemarks?.(item)} title="Remarks" aria-label="Remarks"><MessageSquare size={16}/></button>
+                          <button type="button" className="report-action danger" onClick={() => onReject?.(item)} title="Reject" aria-label="Reject"><Ban size={16}/></button>
+                          <button type="button" className="report-action" onClick={() => onHistory?.(item)} title="History" aria-label="History"><History size={16}/></button>
                         </div>
                       ) : (
                         <button type="button" className="primary" onClick={() => onOpenCase(item)}>Open {mode}</button>
