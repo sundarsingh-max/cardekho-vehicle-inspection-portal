@@ -4201,17 +4201,30 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       const exteriorTitle = Array.from(clone.querySelectorAll('*')).find(el =>
         el.children.length === 0 && (el.textContent || '').trim() === 'Exterior Video'
       )
-      const exteriorSection = exteriorTitle?.parentElement?.parentElement || null
+      // Find the complete card/section by its unique contents, not just the title's
+      // immediate parent (which can leave the video preview box visible in the PDF).
+      let exteriorSection = null
+      let exteriorAncestor = exteriorTitle
+      while (exteriorAncestor && exteriorAncestor !== clone) {
+        const ancestorText = exteriorAncestor.textContent || ''
+        if (/Exterior Video \(Max 59s\)/i.test(ancestorText) && /Replace Video|Upload Exterior Video/i.test(ancestorText)) {
+          exteriorSection = exteriorAncestor
+          break
+        }
+        exteriorAncestor = exteriorAncestor.parentElement
+      }
+      if (!exteriorSection && exteriorTitle) exteriorSection = exteriorTitle.parentElement?.parentElement || null
       const pdfLinkTargets = []
       const linksWrap = document.createElement('div')
       linksWrap.style.cssText = 'display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap;margin-top:10px;padding:8px 0;font-family:Arial,sans-serif;'
-      const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl || form.exteriorVideo?.signedUrl || form.exteriorVideo?.previewUrl || ''
+      const exteriorVideoData = form.exteriorVideo || form.videos?.exteriorVideo || form.videos?.['Exterior Video'] || null
+      const videoUrl = typeof exteriorVideoData === 'string' ? exteriorVideoData : (exteriorVideoData?.publicUrl || exteriorVideoData?.signedUrl || exteriorVideoData?.url || exteriorVideoData?.previewUrl || '')
       const makeTile = (kind, label, url) => {
         if (!url) return
         const a = document.createElement('a')
         a.href = url
         a.setAttribute('aria-label', label)
-        a.style.cssText = 'width:76px;height:62px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:4px;color:#6b7280;text-decoration:none;font-family:Arial,sans-serif;font-size:8px;font-weight:400;text-align:center;cursor:pointer;padding:0 2px;box-sizing:border-box;'
+        a.style.cssText = 'width:94px;height:66px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:4px;color:#6b7280;text-decoration:none;font-family:Arial,sans-serif;font-size:8px;font-weight:400;text-align:center;cursor:pointer;padding:0 2px;box-sizing:border-box;position:relative;z-index:2;'
         if (kind === 'video') {
           a.innerHTML = '<svg width="38" height="38" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="3.5" y="3.5" width="24" height="29" rx="4" fill="#fff" stroke="#ff563f" stroke-width="1.8"/><path d="M13 11.5 L13 24 L22 17.8 Z" fill="#fff" stroke="#ff563f" stroke-width="1.5" stroke-linejoin="round"/><circle cx="29" cy="29" r="8" fill="#fff" stroke="#ff563f" stroke-width="1.8"/><path d="M29 24.5 V29 L32 31" fill="none" stroke="#ff563f" stroke-width="1.5" stroke-linecap="round"/></svg><span>Download Exterior video</span>'
         } else {
@@ -4293,26 +4306,34 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
           pdf.addImage(imgData, 'JPEG', margin, margin, usableWidth, imgHeight, undefined, 'FAST')
           page += 1
         }
-        // Make the media links inside the existing Exterior Video section clickable
-        // in the generated PDF, mapping their on-page positions to PDF coordinates.
+        // Add real PDF URI annotations over each icon tile. The page content is rasterized,
+        // so clickable links must be added separately as PDF annotations.
+        const cloneRect = clone.getBoundingClientRect()
+        const margin = 7
+        const pageWidth = 210
+        const pageHeight = 297
+        const usableWidth = pageWidth - margin * 2
+        const usableHeight = pageHeight - margin * 2
+        const cssPxPerMm = 794 / usableWidth
+        const cssPageHeight = usableHeight * cssPxPerMm
         for (const target of pdfLinkTargets) {
+          if (!target.url) continue
           const rect = target.element.getBoundingClientRect()
-          const cloneRect = clone.getBoundingClientRect()
-          const leftPx = rect.left - cloneRect.left
-          const topPx = rect.top - cloneRect.top
-          const widthPx = Math.max(rect.width, target.element.textContent.length * 5.2, 100)
-          const heightPx = Math.max(rect.height, 12)
-          const pageWidth = 210
-          const pageHeight = 297
-          const margin = 7
-          const usableWidth = pageWidth - margin * 2
-          const usableHeight = pageHeight - margin * 2
-          const pxPerMm = 794 / usableWidth
-          const pageIndex = Math.floor(topPx / (usableHeight * pxPerMm))
-          const yInSlice = topPx - pageIndex * usableHeight * pxPerMm
+          const leftPx = Math.max(0, rect.left - cloneRect.left - 2)
+          const topPx = Math.max(0, rect.top - cloneRect.top - 2)
+          const widthPx = Math.max(rect.width + 4, 94)
+          const heightPx = Math.max(rect.height + 4, 66)
+          const pageIndex = Math.floor(topPx / cssPageHeight)
+          const yInSlice = topPx - pageIndex * cssPageHeight
           if (pageIndex >= 0 && pageIndex < pdf.getNumberOfPages()) {
             pdf.setPage(pageIndex + 1)
-            pdf.link(margin + leftPx / pxPerMm, margin + yInSlice / pxPerMm, widthPx / pxPerMm, heightPx / pxPerMm, { url: target.url })
+            pdf.link(
+              margin + leftPx / cssPxPerMm,
+              margin + yInSlice / cssPxPerMm,
+              Math.min(widthPx / cssPxPerMm, usableWidth - leftPx / cssPxPerMm),
+              Math.min(heightPx / cssPxPerMm, usableHeight - yInSlice / cssPxPerMm),
+              { url: target.url }
+            )
           }
         }
         // Keep all media links within the existing Exterior Video section; never
