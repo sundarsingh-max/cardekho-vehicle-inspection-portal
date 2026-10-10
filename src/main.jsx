@@ -4244,7 +4244,14 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         if (!title || !img) return
         if (!/^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VinPlate Photo|Chassis Imprint|Chassis Number Pencil Tracing)$/i.test(title)) return
         
-const renderedSrc = img.currentSrc || img.src || img.getAttribute('src') || ''
+// Remove original View anchors that may point to a data:image Base64 URL.
+        card.querySelectorAll('a').forEach(anchor => {
+          const href = anchor.getAttribute('href') || ''
+          const label = (anchor.textContent || '').trim()
+          if (/^data:image\//i.test(href) || /^view$/i.test(label)) anchor.remove()
+        })
+
+        const renderedSrc = img.currentSrc || img.src || img.getAttribute('src') || ''
 
         const matchingMedia = Object.values(form.media || {}).find(item => {
           if (!item || typeof item !== 'object') return false
