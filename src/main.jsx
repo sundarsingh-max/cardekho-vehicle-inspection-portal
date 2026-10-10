@@ -4184,16 +4184,25 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       })
       clone.querySelectorAll('[data-no-pdf="true"]').forEach(el => el.remove())
 
-      // PDF-only cleanup: hide original uploaded image filenames beneath photo cards.
-      // The live portal keeps its filenames and controls unchanged.
-      const photoSection = Array.from(clone.querySelectorAll('*')).find(el => el.children.length === 0 && /Inspection Photos \/ Media/i.test(el.textContent || ''))?.parentElement
-      if (photoSection) {
-        const photoGrid = photoSection.querySelector('div[style*="repeat(4, 1fr)"]') || photoSection.querySelector('div[style*="grid-template-columns"]')
-        if (photoGrid) Array.from(photoGrid.children).forEach(card => {
-          const children = Array.from(card.children)
-          if (children.length >= 4) children[children.length - 1].remove()
+      // PDF-only photo-card cleanup: keep the photo heading (e.g. 'Selfie with Vehicle')
+      // and the image, but remove the Replace/Upload row and uploaded filename. This only
+      // runs against the off-screen PDF clone; the live portal remains unchanged.
+      Array.from(clone.querySelectorAll('div')).forEach(card => {
+        if (!card.querySelector('img')) return
+        const directChildren = Array.from(card.children)
+        if (directChildren.length < 3) return
+        // A photo tile has a short title followed by the image frame, action row and filename.
+        const titleText = (directChildren[0]?.textContent || '').trim()
+        const imageFrame = directChildren.find(el => el.querySelector && el.querySelector('img'))
+        if (!titleText || !imageFrame || !/^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images|VinPlate Photo|Chassis Imprint|Chassis Number Pencil Tracing)$/i.test(titleText)) return
+        directChildren.slice(1).forEach(child => {
+          if (child === imageFrame) return
+          const text = (child.textContent || '').trim()
+          const hasUploadControl = !!child.querySelector('input[type="file"]') || /\b(Replace|Upload|Remove)\b/i.test(text)
+          const looksLikeFilename = /\.(jpg|jpeg|png|webp|heic)(\s|$)/i.test(text) || /IMG[-_][A-Za-z0-9._ -]+\.(jpg|jpeg|png|webp|heic)/i.test(text)
+          if (hasUploadControl || looksLikeFilename) child.remove()
         })
-      }
+      })
 
       // PDF-only media shortcut area: remove the entire Exterior Video section
       // (heading, video preview, filename, upload/replace controls and text links)
@@ -4207,22 +4216,43 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       let exteriorAncestor = exteriorTitle
       while (exteriorAncestor && exteriorAncestor !== clone) {
         const ancestorText = exteriorAncestor.textContent || ''
-        if (/Exterior Video \(Max 59s\)/i.test(ancestorText) && /Replace Video|Upload Exterior Video/i.test(ancestorText)) {
+        if (/Exterior Video \(Max 59s\)/i.test(ancestorText) && /Replace Video|Upload Exterior Video|Only exterior inspection video is allowed/i.test(ancestorText)) {
           exteriorSection = exteriorAncestor
           break
         }
         exteriorAncestor = exteriorAncestor.parentElement
       }
-      if (!exteriorSection && exteriorTitle) exteriorSection = exteriorTitle.parentElement?.parentElement || null
+      if (!exteriorSection) {
+        const videoHint = Array.from(clone.querySelectorAll('*')).find(el =>
+          el.children.length === 0 && /Only exterior inspection video is allowed/i.test(el.textContent || '')
+        )
+        let candidate = videoHint || exteriorTitle
+        // Walk upward to the nearest wrapper that contains both the video upload
+        // instructions and its Replace/Upload control, so the complete box is replaced.
+        while (candidate && candidate !== clone) {
+          const text = candidate.textContent || ''
+          if (/Exterior Video/i.test(text) &&
+              /Only exterior inspection video is allowed/i.test(text) &&
+              /Replace Video|Upload Exterior Video/i.test(text)) {
+            exteriorSection = candidate
+            break
+          }
+          candidate = candidate.parentElement
+        }
+      }
       const pdfLinkTargets = []
       const linksWrap = document.createElement('div')
       linksWrap.style.cssText = 'display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap;margin-top:10px;padding:8px 0;font-family:Arial,sans-serif;'
-      const exteriorVideoData = form.exteriorVideo || form.videos?.exteriorVideo || form.videos?.['Exterior Video'] || null
-      const videoUrl = typeof exteriorVideoData === 'string' ? exteriorVideoData : (exteriorVideoData?.publicUrl || exteriorVideoData?.signedUrl || exteriorVideoData?.url || exteriorVideoData?.previewUrl || '')
+      const exteriorVideoData = form.exteriorVideo || form.videos?.exteriorVideo || form.videos?.['Exterior Video'] || form.media?.exteriorVideo || null
+      const videoUrl = typeof exteriorVideoData === 'string'
+        ? exteriorVideoData
+        : (exteriorVideoData?.publicUrl || exteriorVideoData?.signedUrl || exteriorVideoData?.url || exteriorVideoData?.previewUrl || exteriorVideoData?.dataUrl || exteriorVideoData?.src || '')
       const makeTile = (kind, label, url) => {
         if (!url) return
         const a = document.createElement('a')
         a.href = url
+        a.target = '_blank'
+        a.rel = 'noopener noreferrer'
         a.setAttribute('aria-label', label)
         a.style.cssText = 'width:94px;height:66px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:4px;color:#6b7280;text-decoration:none;font-family:Arial,sans-serif;font-size:8px;font-weight:400;text-align:center;cursor:pointer;padding:0 2px;box-sizing:border-box;position:relative;z-index:2;'
         if (kind === 'video') {
@@ -4235,12 +4265,38 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       }
       makeTile('video', 'Download Exterior video', videoUrl)
       makeTile('images', 'Download images', photoZipUrl)
-      if (exteriorSection?.parentNode && linksWrap.children.length) {
+      if (exteriorSection?.parentNode) {
+        // PDF only: replace the whole upload card with the two download tiles.
         exteriorSection.replaceWith(linksWrap)
-      } else if (linksWrap.children.length) {
-        // Fallback: place shortcuts at the end of the report clone, without adding
-        // an extra page or restoring any of the original video-section content.
-        clone.appendChild(linksWrap)
+      } else {
+        // Do not append the tiles to the last page. If markup differs, remove all
+        // Exterior Video upload UI from the PDF clone and place the tiles near the
+        // first matching Exterior Video heading instead.
+        const fallbackTitle = Array.from(clone.querySelectorAll('*')).find(el =>
+          el.children.length === 0 && (el.textContent || '').trim() === 'Exterior Video'
+        )
+        if (fallbackTitle) {
+          let target = fallbackTitle
+          while (target.parentElement && target.parentElement !== clone &&
+                 (target.parentElement.textContent || '').length < 5000) {
+            if (target.parentElement.querySelector('input[type="file"], video') ||
+                /Replace Video|Only exterior inspection video is allowed/i.test(target.parentElement.textContent || '')) {
+              target = target.parentElement
+              break
+            }
+            target = target.parentElement
+          }
+          target.replaceWith(linksWrap)
+        } else {
+          // If the section cannot be located, hide all video-upload UI in the PDF
+          // rather than reintroducing it or placing links on the last page.
+          Array.from(clone.querySelectorAll('*')).forEach(el => {
+            if (el.children.length === 0 && /Only exterior inspection video is allowed|Replace Video|WhatsApp Video/i.test(el.textContent || '')) {
+              const box = el.closest('section, article, fieldset, [class*="card"], [class*="section"]') || el.parentElement
+              box?.remove()
+            }
+          })
+        }
       }
       printHost.appendChild(clone)
       document.body.appendChild(printHost)
@@ -4309,11 +4365,6 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         // Add real PDF URI annotations over each icon tile. The page content is rasterized,
         // so clickable links must be added separately as PDF annotations.
         const cloneRect = clone.getBoundingClientRect()
-        const margin = 7
-        const pageWidth = 210
-        const pageHeight = 297
-        const usableWidth = pageWidth - margin * 2
-        const usableHeight = pageHeight - margin * 2
         const cssPxPerMm = 794 / usableWidth
         const cssPageHeight = usableHeight * cssPxPerMm
         for (const target of pdfLinkTargets) {
