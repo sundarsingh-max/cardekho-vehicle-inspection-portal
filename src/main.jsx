@@ -61,6 +61,79 @@ const items = [
   ['Help Desk', CircleHelp]
 ]
 
+
+function OperationalModule({ active, cases = [], locations = [], tpas = [], clients = [], onRefresh }) {
+  const [query, setQuery] = useState('')
+  const [rows, setRows] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [page, setPage] = useState(1)
+  const pageSize = 25
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setBusy(true); setError('')
+      try {
+        let table = null
+        if (active === 'Audit Trail') table = 'audit_trail'
+        if (active === 'Permissions') table = 'audit_trail'
+        if (table) {
+          const { data, error: fetchError } = await supabase.from(table).select('*').order('id', { ascending: false }).limit(500)
+          if (fetchError) throw fetchError
+          if (!cancelled) setRows(data || [])
+        } else if (active === 'Location/Zone Master') {
+          const { data, error: fetchError } = await supabase.from('location_master').select('*').order('id', { ascending: true }).limit(1000)
+          if (fetchError) throw fetchError
+          if (!cancelled) setRows(data || [])
+        } else if (active === 'Users') {
+          if (!cancelled) setRows([
+            { name: 'Bhanu Singh', role: 'Admin', status: 'Current user setup' },
+            { name: 'Anuj', role: 'Coordinator', status: 'Planned account' },
+            { name: 'Praveen', role: 'Pricing', status: 'Planned account' },
+            { name: 'Rohit', role: 'QC', status: 'Planned account' }
+          ])
+        } else if (active === 'Help Desk') {
+          if (!cancelled) setRows([])
+        } else if (active === 'Case Search') {
+          if (!cancelled) setRows(cases)
+        } else if (active === 'MIS') {
+          if (!cancelled) setRows(cases)
+        }
+      } catch (e) {
+        if (!cancelled) setError(e?.message || 'Unable to load this module.')
+      } finally { if (!cancelled) setBusy(false) }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [active, cases])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter(row => Object.values(row || {}).some(value => String(value ?? '').toLowerCase().includes(q)))
+  }, [rows, query])
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const countStatus = status => cases.filter(c => String(c.status || '').toUpperCase().replace(/[ -]/g, '_') === status).length
+  const headers = active === 'Audit Trail' ? ['case_id','user_name','role','action','stage','old_status','new_status','remarks','created_at']
+    : active === 'Location/Zone Master' ? ['zone','state','city','is_active','created_at']
+    : active === 'Users' ? ['name','role','status']
+    : ['case_id','customer_name','mobile_phone','registration_number','make','model','variant','status','assigned_tpa_name','created_at']
+
+  return <section className="panel operational-module">
+    <div className="module-heading"><div><h2>{active}</h2><p>{active === 'MIS' ? 'Live case summary from the cases table.' : active === 'Case Search' ? 'Search by Case ID, customer, mobile or registration number.' : active === 'Users' ? 'Current role directory. Account creation will be enabled after secure Supabase Auth setup.' : active === 'Location/Zone Master' ? 'Location and zone records from Supabase.' : active === 'Permissions' ? 'Review recorded access-related activity. Role enforcement requires authenticated user accounts and backend policies.' : active === 'Audit Trail' ? 'Recent recorded actions from audit_trail.' : 'Support guidance and issue reporting.'}</p></div><button type="button" className="secondary" onClick={() => { setPage(1); onRefresh?.() }}>↻ Refresh</button></div>
+    {active === 'MIS' && <div className="mis-cards">{[['Total Cases',cases.length],['Open',countStatus('OPEN')],['Assigned',countStatus('ASSIGNED')],['QC',countStatus('QC')],['QC Hold',countStatus('QC_HOLD')],['Pricing',countStatus('PRICING')],['Completed',countStatus('COMPLETED')]].map(([label,value])=><div className="mis-card" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>}
+    {active === 'Help Desk' && <div className="helpdesk-content"><h3>How can we help?</h3><p>For a case issue, use Case Search to find the case and Audit Trail/History to review its activity.</p><p>Ticket submission is not connected yet because a help-desk ticket table is not present in the current schema.</p><button type="button" onClick={() => { navigator.clipboard?.writeText('CarDekho Vehicle Inspection Portal support request'); }}>Copy support subject</button></div>}
+    {(active === 'Case Search' || active === 'Audit Trail' || active === 'Location/Zone Master' || active === 'Users' || active === 'Permissions') && <>
+      <input className="module-search" value={query} onChange={e=>{setQuery(e.target.value);setPage(1)}} placeholder={active === 'Case Search' ? 'Search case ID, registration, customer, mobile…' : 'Filter records…'} />
+      {busy ? <p>Loading records…</p> : error ? <p className="module-error">{error}</p> : <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h.replace(/_/g,' ').toUpperCase()}</th>)}</tr></thead><tbody>{pageRows.map((row,i)=><tr key={row.id || row.case_id || i}>{headers.map(h=><td key={h}>{row[h] == null || row[h] === '' ? '—' : typeof row[h] === 'boolean' ? (row[h] ? 'Active' : 'Inactive') : String(row[h])}</td>)}</tr>)}{!pageRows.length && <tr><td colSpan={headers.length}>No matching records found.</td></tr>}</tbody></table></div>}
+      <div className="case-pagination"><span>Showing {filtered.length ? (page-1)*pageSize+1 : 0}–{Math.min(page*pageSize,filtered.length)} of {filtered.length}</span><div className="page-controls"><button disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Previous</button><span>Page {page} of {pages}</span><button disabled={page>=pages} onClick={()=>setPage(p=>Math.min(pages,p+1))}>Next</button></div></div>
+    </>}
+    {active === 'Users' && <p className="module-note">User creation and activation controls will only be enabled after secure Supabase Auth/server-side setup; this page does not create fake login accounts.</p>}
+  </section>
+}
+
 function App() {
   const [active, setActive] = useState('Dashboard')
   const [add, setAdd] = useState(false)
@@ -2901,27 +2974,7 @@ function App() {
           <TpaQcReport mode="Report Generated" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Report Generated')} onSave={(valueOverride) => tpaQcCase && queueMasterInspectionReportSave(tpaQcCase, valueOverride || tpaQcForm, 'Report Generated', true)} onSubmit={() => {}} onRemarks={item => openRemarkCase(item || tpaQcCase)} onReject={item => openRejectCase(item || tpaQcCase)} onHistory={item => openHistory(item || tpaQcCase)} onHold={() => {}} />
         ) : (
 
-          <section className="panel empty">
-
-            <Database />
-
-            <h2>{active}</h2>
-
-            <p>
-              Module ready for the next implementation stage.
-            </p>
-
-            <button
-              className="primary"
-              onClick={() => {
-                setEditCase(null)
-                setAdd(true)
-              }}
-            >
-              ＋ Add Lead
-            </button>
-
-          </section>
+          <OperationalModule active={active} cases={cases} locations={locations} tpas={tpas} clients={clients} onRefresh={loadCases} />
 
         )}
 
