@@ -160,7 +160,7 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
     {['Client Master','MMV Master','Location/Zone Master','Users','Permissions'].includes(active) && <p className="module-note">Records are read from Supabase. Add/edit/remove controls are not enabled until authenticated Admin identity and server-side authorization are wired; this avoids exposing master deletion or role changes to ordinary users.</p>}
   </section>
 }
-function App() {
+function App({ role = 'Admin', userProfile = null }) {
   const [active, setActive] = useState('Dashboard')
   const [add, setAdd] = useState(false)
   const [hist, setHist] = useState(false)
@@ -1896,7 +1896,16 @@ function App() {
         </div>
 
         <nav>
-          {items.map(
+          {items.filter(([name]) => {
+            const accessByRole = {
+              Admin: items.map(([itemName]) => itemName),
+              Coordinator: ['Dashboard','Add Lead','Open Lead','Assign','Reassign','QC Hold','MIS','Case Search','TPA Master','Client Master','MMV Master','Location/Zone Master','Audit Trail','Help Desk'],
+              TPA: ['Dashboard','Open Lead','Assign','Reassign','TPA QC','QC Hold','Case Search','MIS','Help Desk'],
+              QC: ['Dashboard','TPA QC','QC','QC Hold','Open Lead','Case Search','MIS','Audit Trail','Help Desk'],
+              Pricing: ['Dashboard','Pricing','Report Generated','QC Hold','Open Lead','Case Search','MIS','Audit Trail','Help Desk']
+            }
+            return (accessByRole[role] || accessByRole.TPA).includes(name)
+          }).map(
             ([name, Icon]) => (
               <button
                 key={name}
@@ -1924,8 +1933,8 @@ function App() {
         </nav>
 
         <div className="user">
-          SS&nbsp; Sundar Singh
-          <small>Admin</small>
+          {(userProfile?.full_name || userProfile?.email || 'Portal User')}
+          <small>{role}</small>
         </div>
       </aside>
 
@@ -1961,7 +1970,7 @@ function App() {
             </button>
 
             <b>
-              SS Sundar Singh · Admin
+              {(userProfile?.full_name || userProfile?.email || 'Portal User')} · {role}
             </b>
 
           </div>
@@ -5444,7 +5453,7 @@ function AuthGate() {
     <button className="auth-link" type="button" onClick={signOut}>Sign out</button>
   </form></main>
 
-  return <><div className="auth-session-bar"><span>Signed in: <strong>{profile.full_name || profile.email}</strong> · {profile.trustedRole || profile.role}</span><button type="button" onClick={signOut}>Sign out</button></div><App /></>
+  return <><div className="auth-session-bar"><span>Signed in: <strong>{profile.full_name || profile.email}</strong> · {profile.role}</span><button type="button" onClick={signOut}>Sign out</button></div><App role={profile.role} userProfile={profile} /></>
 }
 
 createRoot(
