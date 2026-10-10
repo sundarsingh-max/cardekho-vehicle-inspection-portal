@@ -4183,6 +4183,44 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         el.replaceWith(span)
       })
       clone.querySelectorAll('[data-no-pdf="true"]').forEach(el => el.remove())
+
+      // PDF-only cleanup: hide original uploaded image filenames beneath photo cards.
+      // The live portal keeps its filenames and controls unchanged.
+      const photoSection = Array.from(clone.querySelectorAll('*')).find(el => el.children.length === 0 && /Inspection Photos \/ Media/i.test(el.textContent || ''))?.parentElement
+      if (photoSection) {
+        const photoGrid = photoSection.querySelector('div[style*="repeat(4, 1fr)"]') || photoSection.querySelector('div[style*="grid-template-columns"]')
+        if (photoGrid) Array.from(photoGrid.children).forEach(card => {
+          const children = Array.from(card.children)
+          if (children.length >= 4) children[children.length - 1].remove()
+        })
+      }
+
+      // Put the two working media links inside the existing Exterior Video section
+      // in the PDF itself. Do not create an extra downloads page.
+      const videoPanel = Array.from(clone.querySelectorAll('div')).find(el => el.children.length > 0 && /Exterior Video \(Max 59s\)/i.test(el.textContent || '') && el.querySelector('video'))
+      const pdfLinkTargets = []
+      if (videoPanel) {
+        const linksWrap = document.createElement('div')
+        linksWrap.style.cssText = 'display:flex;gap:18px;flex-wrap:wrap;margin-top:6px;font-size:10px;'
+        const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl || form.exteriorVideo?.signedUrl || ''
+        if (videoUrl) {
+          const a = document.createElement('a')
+          a.href = videoUrl
+          a.textContent = '▶ Play / Open Exterior Inspection Video'
+          a.style.cssText = 'color:#1d4ed8;text-decoration:underline;font-weight:700;'
+          linksWrap.appendChild(a)
+          pdfLinkTargets.push({ element: a, url: videoUrl })
+        }
+        if (photoZipUrl) {
+          const a = document.createElement('a')
+          a.href = photoZipUrl
+          a.textContent = '↓ Download All Inspection Photos (ZIP)'
+          a.style.cssText = 'color:#1d4ed8;text-decoration:underline;font-weight:700;'
+          linksWrap.appendChild(a)
+          pdfLinkTargets.push({ element: a, url: photoZipUrl })
+        }
+        if (linksWrap.children.length) videoPanel.appendChild(linksWrap)
+      }
       printHost.appendChild(clone)
       document.body.appendChild(printHost)
 
@@ -4247,24 +4285,32 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
           pdf.addImage(imgData, 'JPEG', margin, margin, usableWidth, imgHeight, undefined, 'FAST')
           page += 1
         }
-        const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl || form.exteriorVideo?.signedUrl
-        if (videoUrl || photoZipUrl) {
-          pdf.addPage()
-          pdf.setFontSize(12)
-          pdf.setTextColor(0, 0, 0)
-          pdf.text('Inspection Media Downloads', 15, 20)
-          let linkY = 32
-          if (videoUrl) {
-            pdf.setFontSize(10)
-            pdf.setTextColor(30, 80, 180)
-            pdf.textWithLink('Play / Open Exterior Inspection Video', 15, linkY, { url: videoUrl })
-            linkY += 12
+        // Make the media links inside the existing Exterior Video section clickable
+        // in the generated PDF, mapping their on-page positions to PDF coordinates.
+        for (const target of pdfLinkTargets) {
+          const rect = target.element.getBoundingClientRect()
+          const cloneRect = clone.getBoundingClientRect()
+          const leftPx = rect.left - cloneRect.left
+          const topPx = rect.top - cloneRect.top
+          const widthPx = Math.max(rect.width, 20)
+          const heightPx = Math.max(rect.height, 10)
+          const pageWidth = 210
+          const pageHeight = 297
+          const margin = 7
+          const usableWidth = pageWidth - margin * 2
+          const usableHeight = pageHeight - margin * 2
+          const pxPerMm = 794 / usableWidth
+          const pageIndex = Math.floor(topPx / (usableHeight * pxPerMm))
+          const yInSlice = topPx - pageIndex * usableHeight * pxPerMm
+          if (pageIndex >= 0 && pageIndex < pdf.getNumberOfPages()) {
+            pdf.setPage(pageIndex + 1)
+            pdf.link(margin + leftPx / pxPerMm, margin + yInSlice / pxPerMm, widthPx / pxPerMm, heightPx / pxPerMm, { url: target.url })
           }
-          if (photoZipUrl) {
-            pdf.setFontSize(10)
-            pdf.setTextColor(30, 80, 180)
-            pdf.textWithLink('Download All Inspection Photos (ZIP)', 15, linkY, { url: photoZipUrl })
-          }
+        }
+        // Keep all media links within the existing Exterior Video section; never
+        // append a separate Inspection Media Downloads page.
+        if (photoZipUrl) {
+          setForm(prev => ({ ...prev, exteriorVideo: { ...(prev.exteriorVideo || {}), photoZipUrl } }))
         }
         const blob = pdf.output('blob')
         if (!blob || !blob.size) throw new Error('Generated PDF is empty.')
@@ -4805,7 +4851,8 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                   <div style={{ marginTop: 5, fontSize: 9, color: '#555' }}>
                     {videoItem.name || 'Exterior Video'} · {videoItem.duration ? `${videoItem.duration}s · ` : ''}{(Number(videoItem.size || 0) / (1024 * 1024)).toFixed(1)} MB{videoItem.recoveredFromStorage ? ' · Recovered from Storage' : ''}
                   </div>
-                  {(videoItem.url || videoItem.publicUrl) && <a href={videoItem.url || videoItem.publicUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 5, fontSize: 10, color: '#1d4ed8', fontWeight: 700 }}>▶ Play / Open Video</a>}
+                  {(videoItem.url || videoItem.publicUrl) && <a href={videoItem.url || videoItem.publicUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 5, marginRight: 18, fontSize: 10, color: '#1d4ed8', fontWeight: 700 }}>▶ Play / Open Exterior Inspection Video</a>}
+                  {videoItem.photoZipUrl && <a href={videoItem.photoZipUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 5, fontSize: 10, color: '#1d4ed8', fontWeight: 700 }}>↓ Download All Inspection Photos (ZIP)</a>}
                 </div>
               )}
 
