@@ -28,7 +28,12 @@ import {
   CarFront,
   MapPinned,
   KeyRound,
-  CircleHelp
+  CircleHelp,
+  FileDown,
+  Download,
+  ExternalLink,
+  Copy,
+  Ban,
 } from 'lucide-react'
 import { supabase } from './supabaseClient'
 import './styles.css'
