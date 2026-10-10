@@ -75,39 +75,42 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
     async function load() {
       setBusy(true); setError('')
       try {
-        let table = null
-        if (active === 'Audit Trail') table = 'audit_trail'
-        if (active === 'Permissions') table = 'audit_trail'
+        const tableByModule = {
+          'Audit Trail': 'audit_trail',
+          'Client Master': 'clients',
+          'MMV Master': 'mmv_master',
+          'Location/Zone Master': 'location_master',
+          'Permissions': 'user_profiles'
+        }
+        const table = tableByModule[active]
         if (table) {
-          const { data, error: fetchError } = await supabase.from(table).select('*').order('id', { ascending: false }).limit(500)
+          const { data, error: fetchError } = await supabase.from(table).select('*').limit(10000)
           if (fetchError) throw fetchError
-          if (!cancelled) setRows(data || [])
-        } else if (active === 'Location/Zone Master') {
-          const { data, error: fetchError } = await supabase.from('location_master').select('*').order('id', { ascending: true }).limit(1000)
-          if (fetchError) throw fetchError
-          if (!cancelled) setRows(data || [])
+          const sorted = (data || []).sort((a,b) => {
+            const av = a.id ?? a.created_at ?? a.email ?? ''
+            const bv = b.id ?? b.created_at ?? b.email ?? ''
+            return String(bv).localeCompare(String(av), undefined, {numeric:true})
+          })
+          if (!cancelled) setRows(sorted)
         } else if (active === 'Users') {
-          if (!cancelled) setRows([
-            { name: 'Bhanu Singh', role: 'Admin', email: 'Existing Admin', status: 'Account setup required' },
-            { name: 'Sundar Singh', role: 'Admin', email: 'SUNDAR.SINGH@GIRNARSOFT.COM', status: 'Pending Supabase Auth account' },
-            { name: 'Anuj', role: 'Coordinator', email: 'Not provided', status: 'Pending Supabase Auth account' },
-            { name: 'Praveen', role: 'Pricing', email: 'Not provided', status: 'Pending Supabase Auth account' },
-            { name: 'Rohit', role: 'QC', email: 'Not provided', status: 'Pending Supabase Auth account' }
-          ])
+          const { data, error: fetchError } = await supabase.from('user_profiles').select('*').order('created_at', {ascending:false}).limit(1000)
+          if (fetchError) throw fetchError
+          if (!cancelled) setRows(data || [])
+        } else if (active === 'Case Search' || active === 'MIS') {
+          if (!cancelled) setRows(cases)
         } else if (active === 'Help Desk') {
           if (!cancelled) setRows([])
-        } else if (active === 'Case Search') {
-          if (!cancelled) setRows(cases)
-        } else if (active === 'MIS') {
-          if (!cancelled) setRows(cases)
         }
       } catch (e) {
-        if (!cancelled) setError(e?.message || 'Unable to load this module.')
+        if (!cancelled) {
+          setRows([])
+          setError(e?.message || 'Unable to load this module.')
+        }
       } finally { if (!cancelled) setBusy(false) }
     }
     load()
     return () => { cancelled = true }
-  }, [active, cases])
+  }, [active, cases, onRefresh])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -117,24 +120,36 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const countStatus = status => cases.filter(c => String(c.status || '').toUpperCase().replace(/[ -]/g, '_') === status).length
-  const headers = active === 'Audit Trail' ? ['case_id','user_name','role','action','stage','old_status','new_status','remarks','created_at']
-    : active === 'Location/Zone Master' ? ['zone','state','city','is_active','created_at']
-    : active === 'Users' ? ['name','role','email','status']
+  const headers = active === 'Audit Trail' ? ['id','case_id','user_name','role','action','stage','old_status','new_status','remarks','created_at']
+    : active === 'Location/Zone Master' ? Object.keys(rows[0] || {zone:'',state:'',city:'',is_active:'',created_at:''})
+    : active === 'Client Master' ? Object.keys(rows[0] || {id:'',name:'',client_code:'',is_active:'',created_at:''})
+    : active === 'MMV Master' ? Object.keys(rows[0] || {id:'',segment:'',make:'',model:'',variant:'',year:'',is_active:''})
+    : active === 'Users' || active === 'Permissions' ? Object.keys(rows[0] || {full_name:'',email:'',role:'',is_active:'',must_change_password:''})
     : ['case_id','customer_name','mobile_phone','registration_number','make','model','variant','status','assigned_tpa_name','created_at']
 
+  const title = active === 'Permissions' ? 'Role & User Permissions' : active
+  const description = active === 'MIS' ? 'Live case summary from the cases table.'
+    : active === 'Case Search' ? 'Search by Case ID, customer, mobile or registration number.'
+    : active === 'Users' ? 'User profiles currently registered in Supabase. Auth account creation requires the deployed secure Admin function.'
+    : active === 'Permissions' ? 'Role assignments and account flags from user_profiles. This view does not itself grant privileges.'
+    : active === 'Client Master' ? 'Client master records loaded from Supabase.'
+    : active === 'MMV Master' ? 'Make, model and variant master records loaded from Supabase.'
+    : active === 'Location/Zone Master' ? 'Location and zone records from Supabase.'
+    : active === 'Audit Trail' ? 'Recent recorded actions from audit_trail.'
+    : 'Support guidance and issue reporting.'
+
   return <section className="panel operational-module">
-    <div className="module-heading"><div><h2>{active}</h2><p>{active === 'MIS' ? 'Live case summary from the cases table.' : active === 'Case Search' ? 'Search by Case ID, customer, mobile or registration number.' : active === 'Users' ? 'Current role directory. Account creation will be enabled after secure Supabase Auth setup.' : active === 'Location/Zone Master' ? 'Location and zone records from Supabase.' : active === 'Permissions' ? 'Review recorded access-related activity. Role enforcement requires authenticated user accounts and backend policies.' : active === 'Audit Trail' ? 'Recent recorded actions from audit_trail.' : 'Support guidance and issue reporting.'}</p></div><button type="button" className="secondary" onClick={() => { setPage(1); onRefresh?.() }}>↻ Refresh</button></div>
+    <div className="module-heading"><div><h2>{title}</h2><p>{description}</p></div><button type="button" className="secondary" onClick={() => { setPage(1); setQuery(''); onRefresh?.(); }}>↻ Refresh</button></div>
     {active === 'MIS' && <div className="mis-cards">{[['Total Cases',cases.length],['Open',countStatus('OPEN')],['Assigned',countStatus('ASSIGNED')],['QC',countStatus('QC')],['QC Hold',countStatus('QC_HOLD')],['Pricing',countStatus('PRICING')],['Completed',countStatus('COMPLETED')]].map(([label,value])=><div className="mis-card" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>}
     {active === 'Help Desk' && <div className="helpdesk-content"><h3>How can we help?</h3><p>For a case issue, use Case Search to find the case and Audit Trail/History to review its activity.</p><p>Ticket submission is not connected yet because a help-desk ticket table is not present in the current schema.</p><button type="button" onClick={() => { navigator.clipboard?.writeText('CarDekho Vehicle Inspection Portal support request'); }}>Copy support subject</button></div>}
-    {(active === 'Case Search' || active === 'Audit Trail' || active === 'Location/Zone Master' || active === 'Users' || active === 'Permissions') && <>
+    {(['Case Search','Audit Trail','Client Master','MMV Master','Location/Zone Master','Users','Permissions'].includes(active)) && <>
       <input className="module-search" value={query} onChange={e=>{setQuery(e.target.value);setPage(1)}} placeholder={active === 'Case Search' ? 'Search case ID, registration, customer, mobile…' : 'Filter records…'} />
-      {busy ? <p>Loading records…</p> : error ? <p className="module-error">{error}</p> : <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h.replace(/_/g,' ').toUpperCase()}</th>)}</tr></thead><tbody>{pageRows.map((row,i)=><tr key={row.id || row.case_id || i}>{headers.map(h=><td key={h}>{row[h] == null || row[h] === '' ? '—' : typeof row[h] === 'boolean' ? (row[h] ? 'Active' : 'Inactive') : String(row[h])}</td>)}</tr>)}{!pageRows.length && <tr><td colSpan={headers.length}>No matching records found.</td></tr>}</tbody></table></div>}
+      {busy ? <p>Loading records…</p> : error ? <p className="module-error">{error}</p> : <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h.replace(/_/g,' ').toUpperCase()}</th>)}</tr></thead><tbody>{pageRows.map((row,i)=><tr key={row.id || row.user_id || row.case_id || i}>{headers.map(h=><td key={h}>{row[h] == null || row[h] === '' ? '—' : typeof row[h] === 'boolean' ? (row[h] ? 'Active' : 'Inactive') : String(row[h])}</td>)}</tr>)}{!pageRows.length && <tr><td colSpan={headers.length}>{busy ? 'Loading…' : 'No records found in this table, or access is not granted by Supabase policies.'}</td></tr>}</tbody></table></div>}
       <div className="case-pagination"><span>Showing {filtered.length ? (page-1)*pageSize+1 : 0}–{Math.min(page*pageSize,filtered.length)} of {filtered.length}</span><div className="page-controls"><button disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Previous</button><span>Page {page} of {pages}</span><button disabled={page>=pages} onClick={()=>setPage(p=>Math.min(pages,p+1))}>Next</button></div></div>
     </>}
-    {active === 'Users' && <p className="module-note">User creation and activation controls will only be enabled after secure Supabase Auth/server-side setup; this page does not create fake login accounts.</p>}
+    {['Client Master','MMV Master','Location/Zone Master','Users','Permissions'].includes(active) && <p className="module-note">Records are read from Supabase. Add/edit/remove controls are not enabled until authenticated Admin identity and server-side authorization are wired; this avoids exposing master deletion or role changes to ordinary users.</p>}
   </section>
 }
-
 function App() {
   const [active, setActive] = useState('Dashboard')
   const [add, setAdd] = useState(false)
