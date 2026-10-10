@@ -3922,6 +3922,8 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
   const [pdfMessage, setPdfMessage] = useState('')
   const [reportEditMode, setReportEditMode] = useState(mode !== 'Report Generated')
   const [reportLinks, setReportLinks] = useState({})
+  const [listPage, setListPage] = useState(1)
+  const pageSize = 25
 
   useEffect(() => {
     if (caseItem || mode !== 'Report Generated' || !cases.length) return
@@ -3985,7 +3987,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                 </tr>
               </thead>
               <tbody>
-                {tpaQcCases.slice((currentPage - 1) * pageSize, currentPage * pageSize).map(item => (
+                {tpaQcCases.slice((listPage - 1) * pageSize, listPage * pageSize).map(item => (
                   <tr key={item.id}>
                     <td style={{ padding: '11px 8px', fontWeight: 700 }}>CASE-{item.case_id}</td>
                     <td style={{ padding: '11px 8px' }}>{item.customer_name || '—'}</td>
@@ -4019,6 +4021,14 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                 ))}
               </tbody>
             </table>
+            <div className="case-pagination">
+              <span>Showing {tpaQcCases.length ? ((listPage - 1) * pageSize + 1) : 0}–{Math.min(listPage * pageSize, tpaQcCases.length)} of {tpaQcCases.length} cases</span>
+              <div className="page-controls">
+                <button type="button" disabled={listPage <= 1} onClick={() => setListPage(p => Math.max(1, p - 1))}>Previous</button>
+                <span>Page {listPage} of {Math.max(1, Math.ceil(tpaQcCases.length / pageSize))}</span>
+                <button type="button" disabled={listPage >= Math.ceil(tpaQcCases.length / pageSize)} onClick={() => setListPage(p => Math.min(Math.ceil(tpaQcCases.length / pageSize), p + 1))}>Next</button>
+              </div>
+            </div>
           </div>
         )}
       </section>
