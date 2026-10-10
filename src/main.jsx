@@ -92,6 +92,9 @@ function App() {
   const [dbError, setDbError] = useState('')
 
   const [search, setSearch] = useState('')
+  const [pageByView, setPageByView] = useState({})
+  const pageSize = 25
+  const currentPage = pageByView[active] || 1
 
   const [clients, setClients] = useState([])
   const [mmv, setMmv] = useState([])
@@ -2428,7 +2431,7 @@ function App() {
                   </thead>
 
                   <tbody>
-                    {openLeads.map(item => (
+                    {openLeads.slice((currentPage - 1) * pageSize, currentPage * pageSize).map(item => (
                         <tr key={item.id}>
                           <td>
                             <strong>CASE-{item.case_id}</strong>
@@ -2616,6 +2619,7 @@ function App() {
                       <tbody>
                         {cases
                           .filter(item => String(item.status || '').trim().toUpperCase() === 'OPEN')
+                          .slice((currentPage - 1) * pageSize, currentPage * pageSize)
                           .map(item => (
                             <tr key={item.id}>
                               <td><strong>CASE-{item.case_id}</strong></td>
@@ -2681,6 +2685,7 @@ function App() {
                             const status = String(item.status || '').trim().toUpperCase()
                             return status === 'ASSIGNED' || status === 'REASSIGNED'
                           })
+                          .slice((currentPage - 1) * pageSize, currentPage * pageSize)
                           .map(item => (
                             <tr key={item.id}>
                               <td><strong>CASE-{item.case_id}</strong></td>
@@ -3980,7 +3985,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                 </tr>
               </thead>
               <tbody>
-                {tpaQcCases.map(item => (
+                {tpaQcCases.slice((currentPage - 1) * pageSize, currentPage * pageSize).map(item => (
                   <tr key={item.id}>
                     <td style={{ padding: '11px 8px', fontWeight: 700 }}>CASE-{item.case_id}</td>
                     <td style={{ padding: '11px 8px' }}>{item.customer_name || '—'}</td>
