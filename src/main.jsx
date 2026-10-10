@@ -4354,11 +4354,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         // Add real PDF URI annotations over each icon tile. The page content is rasterized,
         // so clickable links must be added separately as PDF annotations.
         const cloneRect = clone.getBoundingClientRect()
-        const margin = 7
-        const pageWidth = 210
-        const pageHeight = 297
-        const usableWidth = pageWidth - margin * 2
-        const usableHeight = pageHeight - margin * 2
+        // Reuse the A4 page dimensions declared above for raster slicing.
         const cssPxPerMm = 794 / usableWidth
         const cssPageHeight = usableHeight * cssPxPerMm
         for (const target of [...pdfLinkTargets, ...pdfPhotoTargets]) {
