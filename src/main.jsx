@@ -84,13 +84,23 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
         }
         const table = tableByModule[active]
         if (table) {
-          const { data, error: fetchError } = await supabase.from(table).select('*').limit(10000)
+          let request = supabase.from(table).select('*')
+          // Audit history must be ordered by the event timestamp, not the numeric
+          // row id (which may be imported or allocated independently of event time).
+          if (active === 'Audit Trail') {
+            request = request.order('created_at', { ascending: false, nullsFirst: false }).limit(10000)
+          } else {
+            request = request.limit(10000)
+          }
+          const { data, error: fetchError } = await request
           if (fetchError) throw fetchError
-          const sorted = (data || []).sort((a,b) => {
-            const av = a.id ?? a.created_at ?? a.email ?? ''
-            const bv = b.id ?? b.created_at ?? b.email ?? ''
-            return String(bv).localeCompare(String(av), undefined, {numeric:true})
-          })
+          const sorted = active === 'Audit Trail'
+            ? (data || [])
+            : (data || []).sort((a,b) => {
+                const av = a.id ?? a.created_at ?? a.email ?? ''
+                const bv = b.id ?? b.created_at ?? b.email ?? ''
+                return String(bv).localeCompare(String(av), undefined, {numeric:true})
+              })
           if (!cancelled) setRows(sorted)
         } else if (active === 'Users') {
           const { data, error: fetchError } = await supabase.from('user_profiles').select('*').order('created_at', {ascending:false}).limit(1000)
