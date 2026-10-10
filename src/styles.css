@@ -164,3 +164,130 @@ nav button.active:hover .nav-icon {
   .modal .lead-form-actions { margin: 18px -16px 0; padding: 12px 16px; }
   .modal .lead-form-actions button { flex: 1; min-width: 0; }
 }
+
+
+/* Distinct, polished workflow pages: Open, Assign, Reassign, QC, Pricing */
+main > section.panel {
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: 0 4px 18px rgba(15,23,42,.045);
+}
+main > section.panel > div:first-child h2,
+main > section.panel > h2 {
+  color: #111827;
+  letter-spacing: -.2px;
+}
+main > section.panel > div:first-child {
+  padding-bottom: 15px;
+  border-bottom: 1px solid #e8edf4;
+}
+main > section.panel h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #172033;
+  font-size: 16px;
+  margin-top: 20px;
+}
+main > section.panel table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  margin-top: 12px;
+  font-size: 12px;
+}
+main > section.panel table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f4f7fb;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .25px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding: 13px 12px;
+  border-top: 1px solid #e3e9f2;
+  border-bottom: 1px solid #dce4ef;
+}
+main > section.panel table thead th:first-child { border-radius: 9px 0 0 0; }
+main > section.panel table thead th:last-child { border-radius: 0 9px 0 0; }
+main > section.panel table tbody td {
+  padding: 13px 12px;
+  vertical-align: middle;
+  border-bottom: 1px solid #edf1f6;
+  color: #273449;
+  line-height: 1.4;
+}
+main > section.panel table tbody tr:nth-child(even) { background: #fbfcfe; }
+main > section.panel table tbody tr:hover { background: #f3f7ff; }
+main > section.panel table tbody td strong { color: #1d4ed8; white-space: nowrap; }
+main > section.panel table tbody td small { display: inline-block; margin-top: 3px; color: #64748b; font-size: 10px; }
+main > section.panel table .status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  padding: 5px 9px;
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
+  font-weight: 700;
+  letter-spacing: .25px;
+}
+main > section.panel table button:not(.primary):not(.icon-button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin: 2px;
+  padding: 0;
+  border: 1px solid #dbe3ef;
+  border-radius: 9px;
+  background: #fff;
+  color: #475569;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04);
+  transition: all .16s ease;
+}
+main > section.panel table button:not(.primary):not(.icon-button):hover {
+  color: #be123c;
+  background: #fff1f2;
+  border-color: #fda4af;
+  transform: translateY(-1px);
+}
+main > section.panel table .icon-button {
+  width: 34px;
+  height: 34px;
+  margin: 2px;
+  border-radius: 9px;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04);
+}
+main > section.panel .primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  font-size: 12px;
+  font-weight: 650;
+  background: #2563eb;
+  box-shadow: 0 3px 8px rgba(37,99,235,.15);
+}
+main > section.panel .primary:hover { background: #1d4ed8; transform: translateY(-1px); }
+main > section.panel > div[style*="border: 1px dashed"] {
+  background: linear-gradient(135deg, #fbfdff, #f6f8fc);
+  color: #64748b;
+  border-color: #cbd5e1 !important;
+  border-radius: 12px !important;
+}
+main > section.panel > div[style*="overflow-x: auto"] {
+  border-radius: 10px;
+}
+@media(max-width:700px) {
+  main > section.panel { padding: 14px; }
+  main > section.panel table { min-width: 820px; }
+  main > section.panel table thead th,
+  main > section.panel table tbody td { padding: 10px 9px; }
+}
