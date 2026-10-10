@@ -2609,7 +2609,8 @@ function App() {
                       <thead>
                         <tr>
                           <th>Lead ID</th>
-                          <th>Customer</th>
+                          <th>Customer / Mobile</th>
+                          <th>Bank Executive / Mobile</th>
                           <th>Registration No.</th>
                           <th>Vehicle</th>
                           <th>Status</th>
@@ -2623,7 +2624,8 @@ function App() {
                           .map(item => (
                             <tr key={item.id}>
                               <td><strong>CASE-{item.case_id}</strong></td>
-                              <td>{item.customer_name || '—'}</td>
+                              <td><div className="case-person-cell"><strong>{item.customer_name || '—'}</strong><small>{item.mobile_phone || 'Mobile not available'}</small></div></td>
+                              <td><div className="case-person-cell"><strong>{item.bank_executive_name || '—'}</strong><small>{item.bank_executive_mobile || 'Mobile not available'}</small></div></td>
                               <td>{item.registration_number || '—'}</td>
                               <td>{[item.make, item.model, item.variant].filter(Boolean).join(' ') || '—'}</td>
                               <td><span className="status">OPEN</span></td>
@@ -2670,7 +2672,8 @@ function App() {
                       <thead>
                         <tr>
                           <th>Lead ID</th>
-                          <th>Customer</th>
+                          <th>Customer / Mobile</th>
+                          <th>Bank Executive / Mobile</th>
                           <th>Registration No.</th>
                           <th>Vehicle</th>
                           <th>Current TPA</th>
@@ -2689,7 +2692,8 @@ function App() {
                           .map(item => (
                             <tr key={item.id}>
                               <td><strong>CASE-{item.case_id}</strong></td>
-                              <td>{item.customer_name || '—'}</td>
+                              <td><div className="case-person-cell"><strong>{item.customer_name || '—'}</strong><small>{item.mobile_phone || 'Mobile not available'}</small></div></td>
+                              <td><div className="case-person-cell"><strong>{item.bank_executive_name || '—'}</strong><small>{item.bank_executive_mobile || 'Mobile not available'}</small></div></td>
                               <td>{item.registration_number || '—'}</td>
                               <td>{[item.make, item.model, item.variant].filter(Boolean).join(' ') || '—'}</td>
                               <td>{item.assigned_tpa_name || '—'}</td>
