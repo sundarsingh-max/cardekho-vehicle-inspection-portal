@@ -4214,7 +4214,20 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         const img = card.querySelector('img')
         if (!title || !img) return
         if (!/^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VinPlate Photo|Chassis Imprint|Chassis Number Pencil Tracing)$/i.test(title)) return
-        const src = img.currentSrc || img.src || img.getAttribute('src') || ''
+        
+const renderedSrc = img.currentSrc || img.src || img.getAttribute('src') || ''
+
+const matchingMedia = Object.values(form.media || {}).find(item => {
+  if (!item || typeof item !== 'object') return false
+  return item.dataUrl === renderedSrc ||
+    item.url === renderedSrc ||
+    item.publicUrl === renderedSrc
+})
+
+const src = matchingMedia
+  ? (matchingMedia.publicUrl || matchingMedia.url || matchingMedia.dataUrl || renderedSrc)
+  : renderedSrc
+
         if (!src) return
         card.style.setProperty('min-height', '150px', 'important')
         card.style.setProperty('padding', '6px', 'important')
