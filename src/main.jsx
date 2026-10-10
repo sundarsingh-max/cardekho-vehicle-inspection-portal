@@ -12,32 +12,48 @@ import {
   MessageSquare,
   Save,
   Upload,
-  CheckCircle2
+  CheckCircle2,
+  LayoutDashboard,
+  Plus,
+  ClipboardList,
+  UserCheck,
+  Repeat2,
+  ShieldCheck,
+  BadgeIndianRupee,
+  FileCheck2,
+  ChartNoAxesCombined,
+  Search,
+  Users,
+  Building2,
+  CarFront,
+  MapPinned,
+  KeyRound,
+  CircleHelp
 } from 'lucide-react'
 import { supabase } from './supabaseClient'
 import './styles.css'
 
 const items = [
-  ['Dashboard', '◉'],
-  ['Add Lead', '＋'],
-  ['Open Lead', '□'],
-  ['Assign', '⇥'],
-  ['Reassign', '↻'],
-  ['TPA QC', '✓'],
-  ['QC', '✓'],
-  ['QC Hold', 'Ⅱ'],
-  ['Pricing', '₹'],
-  ['Report Generated', '▣'],
-  ['MIS', '▥'],
-  ['Case Search', '⌕'],
-  ['Users', '♟'],
-  ['TPA Master', '▦'],
-  ['Client Master', '▦'],
-  ['MMV Master', '▦'],
-  ['Location/Zone Master', '⌖'],
-  ['Permissions', '✓'],
-  ['Audit Trail', '◷'],
-  ['Help Desk', '?']
+  ['Dashboard', LayoutDashboard],
+  ['Add Lead', Plus],
+  ['Open Lead', ClipboardList],
+  ['Assign', UserCheck],
+  ['Reassign', Repeat2],
+  ['TPA QC', ShieldCheck],
+  ['QC', ShieldCheck],
+  ['QC Hold', ClipboardList],
+  ['Pricing', BadgeIndianRupee],
+  ['Report Generated', FileCheck2],
+  ['MIS', ChartNoAxesCombined],
+  ['Case Search', Search],
+  ['Users', Users],
+  ['TPA Master', Building2],
+  ['Client Master', Building2],
+  ['MMV Master', CarFront],
+  ['Location/Zone Master', MapPinned],
+  ['Permissions', KeyRound],
+  ['Audit Trail', History],
+  ['Help Desk', CircleHelp]
 ]
 
 function App() {
@@ -1774,7 +1790,7 @@ function App() {
 
         <nav>
           {items.map(
-            ([name, icon]) => (
+            ([name, Icon]) => (
               <button
                 key={name}
                 className={
@@ -1793,7 +1809,7 @@ function App() {
                   }
                 }}
               >
-                <i>{icon}</i>
+                <i className="nav-icon"><Icon size={18} strokeWidth={1.9} aria-hidden="true" /></i>
                 {name}
               </button>
             )
