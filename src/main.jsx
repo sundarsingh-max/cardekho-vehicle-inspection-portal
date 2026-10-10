@@ -5328,8 +5328,117 @@ function clientDisplayName(client) {
   )
 }
 
+function AuthGate() {
+  const [session, setSession] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [loadingAuth, setLoadingAuth] = useState(true)
+  const [authError, setAuthError] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [working, setWorking] = useState(false)
+
+  const loadProfile = async (currentSession) => {
+    if (!currentSession?.user) {
+      setSession(null); setProfile(null); setLoadingAuth(false); return
+    }
+    setSession(currentSession)
+    const { data, error } = await supabase
+      .from('user_profiles')
+      .select('user_id,full_name,email,role,is_active,must_change_password')
+      .eq('user_id', currentSession.user.id)
+      .maybeSingle()
+    if (error) {
+      setAuthError('Profile load failed: ' + error.message)
+      setProfile(null)
+    } else if (!data) {
+      setAuthError('Your login exists, but your user profile is missing. Ask an Admin to repair your account.')
+      setProfile(null)
+    } else if (data.is_active === false) {
+      await supabase.auth.signOut()
+      setSession(null); setProfile(null)
+      setAuthError('Your account is inactive. Please contact an Admin.')
+    } else {
+      setProfile({ ...data, trustedRole: currentSession.user.app_metadata?.role || '' })
+      setAuthError('')
+    }
+    setLoadingAuth(false)
+  }
+
+  useEffect(() => {
+    let mounted = true
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!mounted) return
+      if (error) setAuthError(error.message)
+      loadProfile(data?.session || null)
+    }).catch(error => {
+      if (mounted) { setAuthError(error?.message || 'Unable to check login session.'); setLoadingAuth(false) }
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return
+      // Defer profile loading to avoid doing Supabase queries inside the auth callback.
+      setTimeout(() => { if (mounted) loadProfile(nextSession) }, 0)
+    })
+    return () => { mounted = false; listener?.subscription?.unsubscribe() }
+  }, [])
+
+  const signIn = async (event) => {
+    event.preventDefault(); setWorking(true); setAuthError('')
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+      if (error) throw error
+      if (!data?.session) throw new Error('Login did not create a session. Please try again.')
+      await loadProfile(data.session)
+    } catch (error) { setAuthError(error?.message || 'Login failed.') }
+    finally { setWorking(false) }
+  }
+
+  const changePassword = async (event) => {
+    event.preventDefault(); setAuthError('')
+    if (newPassword.length < 12) { setAuthError('New password must be at least 12 characters.'); return }
+    if (newPassword !== confirmPassword) { setAuthError('New password and confirmation do not match.'); return }
+    setWorking(true)
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
+      if (error) throw error
+      const { error: profileError } = await supabase.from('user_profiles').update({ must_change_password: false }).eq('user_id', session.user.id)
+      if (profileError) throw new Error('Password changed, but first-login flag could not be cleared: ' + profileError.message + '. Ask an Admin to finish account setup.')
+      setProfile(current => current ? { ...current, must_change_password: false } : current)
+      setNewPassword(''); setConfirmPassword('')
+    } catch (error) { setAuthError(error?.message || 'Unable to change password.') }
+    finally { setWorking(false) }
+  }
+
+  const signOut = async () => { await supabase.auth.signOut(); setSession(null); setProfile(null); setPassword('') }
+
+  if (loadingAuth) return <main className="auth-shell"><section className="auth-card"><h1>CarDekho Inspection Portal</h1><p>Checking secure session…</p></section></main>
+
+  if (!session || !profile) return <main className="auth-shell"><form className="auth-card" onSubmit={signIn}>
+    <div className="auth-brand">CarDekho <span>INSPECTION</span></div>
+    <h1>Secure Sign In</h1><p>Sign in with your authorized portal account.</p>
+    {authError && <div className="auth-error" role="alert">{authError}</div>}
+    <label className="auth-field">Email address<input type="email" autoComplete="username" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@company.com" /></label>
+    <label className="auth-field">Password<input type="password" autoComplete="current-password" required value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter your password" /></label>
+    <button className="auth-submit" type="submit" disabled={working}>{working ? 'Signing in…' : 'Sign In'}</button>
+    <small>Access is limited to active accounts registered by an Admin.</small>
+  </form></main>
+
+  if (profile.must_change_password) return <main className="auth-shell"><form className="auth-card" onSubmit={changePassword}>
+    <div className="auth-brand">CarDekho <span>INSPECTION</span></div><h1>Set a new password</h1>
+    <p>For security, change your temporary password before continuing.</p>
+    {authError && <div className="auth-error" role="alert">{authError}</div>}
+    <label className="auth-field">New password<input type="password" autoComplete="new-password" required minLength={12} value={newPassword} onChange={e=>setNewPassword(e.target.value)} /></label>
+    <label className="auth-field">Confirm new password<input type="password" autoComplete="new-password" required minLength={12} value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} /></label>
+    <button className="auth-submit" type="submit" disabled={working}>{working ? 'Updating…' : 'Change Password'}</button>
+    <button className="auth-link" type="button" onClick={signOut}>Sign out</button>
+  </form></main>
+
+  return <><div className="auth-session-bar"><span>Signed in: <strong>{profile.full_name || profile.email}</strong> · {profile.trustedRole || profile.role}</span><button type="button" onClick={signOut}>Sign out</button></div><App /></>
+}
+
 createRoot(
   document.getElementById('root')
 ).render(
-  <App />
+  <AuthGate />
 )
