@@ -4082,31 +4082,61 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       const JsPdf = window.jspdf?.jsPDF
       if (!JsPdf || !window.html2canvas) throw new Error('PDF libraries are unavailable.')
 
+      // Package every uploaded inspection photo into a downloadable ZIP. The ZIP is
+      // stored beside the PDF so the link remains usable after the report is shared.
+      let photoZipUrl = ''
+      const photoEntries = Object.entries(form.media || {}).filter(([, item]) => {
+        if (typeof item === 'string') return Boolean(item)
+        return Boolean(item?.dataUrl || item?.url || item?.publicUrl)
+      })
+      if (photoEntries.length) {
+        setPdfMessage('Preparing downloadable ZIP of inspection photos...')
+        const zipUrls = [
+          'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
+          'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'
+        ]
+        let zipLoaded = false
+        let zipLoadError = null
+        for (const url of zipUrls) {
+          try { await loadExternalScript(url); if (window.JSZip) { zipLoaded = true; break } } catch (e) { zipLoadError = e }
+        }
+        if (!zipLoaded || !window.JSZip) throw new Error(`Unable to load ZIP tool for photo download. ${zipLoadError?.message || ''}`)
+        const zip = new window.JSZip()
+        const safeFileName = value => String(value || 'inspection-photo').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '_')
+        let packed = 0
+        for (const [label, item] of photoEntries) {
+          const src = typeof item === 'string' ? item : (item.dataUrl || item.url || item.publicUrl)
+          try {
+            const response = await fetch(src)
+            if (!response.ok) throw new Error(`HTTP ${response.status}`)
+            const blob = await response.blob()
+            const originalName = typeof item === 'object' ? item.name : ''
+            const ext = (originalName && /\.[a-z0-9]{2,5}$/i.test(originalName)) ? originalName.split('.').pop() : (blob.type?.split('/')[1] || 'jpg')
+            zip.file(`${String(packed + 1).padStart(2, '0')}_${safeFileName(label)}.${safeFileName(ext)}`, blob)
+            packed += 1
+          } catch (e) {
+            console.warn(`Could not add inspection photo to ZIP: ${label}`, e)
+          }
+        }
+        if (packed) {
+          const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 5 } })
+          const zipPath = `${caseItem.case_id}/${Date.now()}_inspection_photos.zip`
+          const zipUpload = await supabase.storage.from('inspection-reports').upload(zipPath, zipBlob, { contentType: 'application/zip', upsert: true })
+          if (zipUpload.error) throw new Error(`Photo ZIP upload failed: ${zipUpload.error.message}`)
+          const { data: zipPublic } = supabase.storage.from('inspection-reports').getPublicUrl(zipPath)
+          photoZipUrl = zipPublic?.publicUrl || ''
+          if (!photoZipUrl) throw new Error('Photo ZIP uploaded but download URL could not be created.')
+        } else {
+          throw new Error('No inspection photos could be packaged. Please check that the uploaded photos are accessible, then retry.')
+        }
+      }
+
       // Render a fixed-width clone so wide two-column tables and photos are not clipped by the screen viewport.
+      // The sample PDF remains the target layout; this preserves the portal report's sections while fixing field values and image clarity.
       const source = reportRef.current
       printHost = document.createElement('div')
       printHost.style.cssText = 'position:fixed;left:-20000px;top:0;width:794px;background:#fff;z-index:-1;overflow:visible;'
       const clone = source.cloneNode(true)
-      // cloneNode() does not reliably copy live React-controlled form state.
-      // Mirror the live DOM values into the cloned controls before converting them to text.
-      const liveControls = Array.from(source.querySelectorAll('input, select, textarea'))
-      const clonedControls = Array.from(clone.querySelectorAll('input, select, textarea'))
-      liveControls.forEach((live, index) => {
-        const copy = clonedControls[index]
-        if (!copy) return
-        if (live.tagName === 'SELECT') {
-          copy.selectedIndex = live.selectedIndex
-          Array.from(copy.options).forEach((option, optionIndex) => {
-            option.selected = Boolean(live.options[optionIndex]?.selected)
-          })
-        } else if (live.type === 'checkbox' || live.type === 'radio') {
-          copy.checked = live.checked
-        } else {
-          copy.value = live.value
-          copy.setAttribute('value', live.value)
-          if (live.tagName === 'TEXTAREA') copy.textContent = live.value
-        }
-      })
       clone.style.width = '794px'
       clone.style.maxWidth = '794px'
       clone.style.minWidth = '794px'
@@ -4125,48 +4155,32 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
           el.style.objectFit = 'contain'
         }
       })
-      // Convert editable controls to their CURRENT visible values before capture.
-      // Removing input/select/textarea outright was the reason PDF values disappeared.
-      clone.querySelectorAll('input, select, textarea').forEach(control => {
-        const tag = control.tagName.toLowerCase()
-        let value = ''
-        if (tag === 'select') {
-          value = control.selectedOptions?.[0]?.textContent || control.value || ''
-        } else if (control.type === 'checkbox' || control.type === 'radio') {
-          value = control.checked ? 'Yes' : 'No'
-        } else {
-          value = control.value || control.getAttribute('value') || ''
-        }
-        const printable = document.createElement('div')
-        printable.textContent = value || '—'
-        printable.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;min-height:1em;box-sizing:border-box;color:#111;background:transparent;font:inherit;line-height:1.35;padding:2px 3px;border:0;'
-        const computed = window.getComputedStyle(control)
-        printable.style.textAlign = computed.textAlign
-        printable.style.width = control.style.width || '100%'
-        if (tag === 'textarea') printable.style.minHeight = `${Math.max(1, (value.match(/\n/g) || []).length + 1) * 1.35}em`
-        control.replaceWith(printable)
-      })
-      // The live portal has a large video player for playback. In the PDF,
-      // replace it with a compact text link instead of printing the empty player box.
-      clone.querySelectorAll('video').forEach(video => {
-        const url = video.getAttribute('src') || video.currentSrc || ''
-        const wrapper = video.parentElement
-        if (wrapper) {
-          const link = document.createElement('a')
-          link.href = url
-          link.textContent = '▶ Play / Open Video'
-          link.style.cssText = 'display:inline-block;color:#1d4ed8;font-size:10px;font-weight:700;text-decoration:underline;padding:3px 0;'
-          wrapper.replaceChildren(link)
-          wrapper.style.cssText = 'border:0;background:transparent;padding:0;margin:4px 0;min-height:0;height:auto;'
-        } else {
-          video.remove()
-        }
-      })
       // Photo previews are wrapped in buttons for click-to-zoom. Unwrap those
       // buttons before PDF capture so the IMG elements remain in the report.
       clone.querySelectorAll('button').forEach(button => {
-        if (button.querySelector('img')) button.replaceWith(...Array.from(button.childNodes))
-        else button.remove()
+        if (button.querySelector('img')) {
+          button.replaceWith(...Array.from(button.childNodes))
+        } else {
+          button.remove()
+        }
+      })
+      // Preserve live form values in the PDF. cloneNode() does not reliably copy the
+      // current React-controlled value of inputs/selects/textareas, and removing them
+      // caused filled fields to appear blank in the generated PDF.
+      const sourceControls = Array.from(source.querySelectorAll('input, select, textarea'))
+      const clonedControls = Array.from(clone.querySelectorAll('input, select, textarea'))
+      clonedControls.forEach((el, index) => {
+        const original = sourceControls[index]
+        let value = ''
+        if (original) {
+          if (original.tagName === 'SELECT') value = original.selectedOptions?.[0]?.textContent?.trim() || original.value || ''
+          else value = original.value || original.getAttribute('value') || ''
+          if (original.type === 'checkbox' || original.type === 'radio') value = original.checked ? 'Yes' : 'No'
+        }
+        const span = document.createElement('span')
+        span.textContent = value || '—'
+        span.style.cssText = 'display:inline-block;white-space:pre-wrap;overflow-wrap:anywhere;color:#111827;font:inherit;min-height:1em;'
+        el.replaceWith(span)
       })
       clone.querySelectorAll('[data-no-pdf="true"]').forEach(el => el.remove())
       printHost.appendChild(clone)
@@ -4186,17 +4200,16 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         setTimeout(done, 15000)
       })))
 
-      // Start with print-quality rasterization. The old sub-1x scale and low
-      // JPEG quality made small text, logos and inspection photos visibly blurry.
       const attempts = [
-        { scale: 2.0, quality: 0.94 },
-        { scale: 1.6, quality: 0.90 },
-        { scale: 1.35, quality: 0.86 }
+        { scale: 2.0, quality: 0.96 },
+        { scale: 1.6, quality: 0.92 },
+        { scale: 1.25, quality: 0.88 },
+        { scale: 1.0, quality: 0.84 }
       ]
       let finalBlob = null
       let finalDoc = null
       for (const attempt of attempts) {
-        setPdfMessage(`Rendering report and photos at high resolution (${Math.round(attempt.scale * 100)}% scale)...`)
+        setPdfMessage(`Rendering complete report and photos (${Math.round(attempt.scale * 100)}% quality)...`)
         const canvas = await window.html2canvas(clone, {
           scale: attempt.scale,
           useCORS: true,
@@ -4235,25 +4248,34 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
           page += 1
         }
         const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl || form.exteriorVideo?.signedUrl
-        if (videoUrl) {
+        if (videoUrl || photoZipUrl) {
           pdf.addPage()
           pdf.setFontSize(12)
           pdf.setTextColor(0, 0, 0)
-          pdf.text('Exterior Inspection Video', 15, 20)
-          pdf.setFontSize(10)
-          pdf.setTextColor(30, 80, 180)
-          pdf.textWithLink('Play / Open Video', 15, 32, { url: videoUrl })
+          pdf.text('Inspection Media Downloads', 15, 20)
+          let linkY = 32
+          if (videoUrl) {
+            pdf.setFontSize(10)
+            pdf.setTextColor(30, 80, 180)
+            pdf.textWithLink('Play / Open Exterior Inspection Video', 15, linkY, { url: videoUrl })
+            linkY += 12
+          }
+          if (photoZipUrl) {
+            pdf.setFontSize(10)
+            pdf.setTextColor(30, 80, 180)
+            pdf.textWithLink('Download All Inspection Photos (ZIP)', 15, linkY, { url: photoZipUrl })
+          }
         }
         const blob = pdf.output('blob')
         if (!blob || !blob.size) throw new Error('Generated PDF is empty.')
         finalBlob = blob
         finalDoc = pdf
         if (canvas.toDataURL) canvas.width = 1 // release the large canvas buffer before the next attempt
-        if (finalBlob.size <= 10 * 1024 * 1024) break
+        if (finalBlob.size <= 12 * 1024 * 1024) break
       }
       if (!finalBlob || !finalDoc) throw new Error('Unable to generate PDF.')
       const path = `${caseItem.case_id}/${Date.now()}_inspection_report.pdf`
-      setPdfMessage('Uploading high-resolution PDF with report values and photos...')
+      setPdfMessage('Uploading complete PDF with photos...')
       const upload = await supabase.storage.from('inspection-reports').upload(path, finalBlob, {
         contentType: 'application/pdf',
         upsert: true
@@ -4849,18 +4871,20 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         </div>
 
       {photoViewer && (
-        <div onClick={() => { setPhotoViewer(null); setPhotoZoom(1) }} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div onClick={() => setPhotoViewer(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
           <div onClick={e => e.stopPropagation()} style={{ position: 'relative', width: 'min(95vw, 1100px)', height: 'min(90vh, 800px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             <button type="button" onClick={() => setPhotoViewer(null)} style={{ position: 'absolute', top: 0, right: 0, zIndex: 2, width: 34, height: 34, borderRadius: '50%', border: 'none', background: '#fff', color: '#111', fontSize: 22, cursor: 'pointer' }}>×</button>
             <div style={{ color: '#fff', fontWeight: 700, marginBottom: 8 }}>{photoViewer.name}</div>
-            <div onWheel={e => { e.preventDefault(); setPhotoZoom(z => Math.max(0.5, Math.min(4, Number((z + (e.deltaY < 0 ? 0.15 : -0.15)).toFixed(2))))) }} style={{ maxWidth: '100%', maxHeight: 'calc(100% - 70px)', overflow: 'auto', background: '#111', padding: 10, cursor: 'zoom-in' }}>
+            <div onWheel={e => { if (['TPA QC','QC','QC Hold','Pricing','Report Generated'].includes(mode)) { e.preventDefault(); setPhotoZoom(z => Math.max(0.5, Math.min(3, Number((z + (e.deltaY < 0 ? 0.15 : -0.15)).toFixed(2))))) } }} style={{ maxWidth: '100%', maxHeight: 'calc(100% - 70px)', overflow: 'auto', background: '#111', padding: 10, cursor: ['TPA QC','QC','QC Hold','Pricing','Report Generated'].includes(mode) ? 'zoom-in' : 'default' }}>
               <img src={photoViewer.src} alt={photoViewer.name} style={{ maxWidth: 'none', width: `${Math.round(700 * photoZoom)}px`, height: 'auto', display: 'block' }} />
             </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <button type="button" onClick={() => setPhotoZoom(z => Math.min(4, Number((z + 0.25).toFixed(2))))}>Zoom In +</button>
-              <button type="button" onClick={() => setPhotoZoom(z => Math.max(0.5, Number((z - 0.25).toFixed(2))))}>Zoom Out −</button>
-              <button type="button" onClick={() => setPhotoZoom(1)}>Reset</button>
-            </div>
+            {['TPA QC','QC','QC Hold','Pricing','Report Generated'].includes(mode) && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button type="button" onClick={() => setPhotoZoom(z => Math.min(3, Number((z + 0.25).toFixed(2))))}>Zoom In +</button>
+                <button type="button" onClick={() => setPhotoZoom(z => Math.max(0.5, Number((z - 0.25).toFixed(2))))}>Zoom Out −</button>
+                <button type="button" onClick={() => setPhotoZoom(1)}>Reset</button>
+              </div>
+            )}
           </div>
         </div>
       )}
