@@ -4278,15 +4278,20 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         linksWrap.appendChild(a)
         pdfLinkTargets.push({ element: a, url })
       }
-      makeTile('video', 'Download Exterior video', videoUrl)
-      makeTile('images', 'Download images', photoZipUrl)
-      if (exteriorSection?.parentNode && linksWrap.children.length) {
-        exteriorSection.replaceWith(linksWrap)
-      } else if (linksWrap.children.length) {
-        // Fallback: place shortcuts at the end of the report clone, without adding
-        // an extra page or restoring any of the original video-section content.
-        clone.appendChild(linksWrap)
-      }
+     
+makeTile('video', 'Download Exterior video', videoUrl)
+makeTile('images', 'Download images', photoZipUrl)
+
+if (exteriorSection?.parentNode) {
+  if (linksWrap.children.length > 0) {
+    exteriorSection.replaceWith(linksWrap)
+  } else {
+    exteriorSection.remove()
+  }
+} else if (linksWrap.children.length > 0) {
+  clone.appendChild(linksWrap)
+}
+
       printHost.appendChild(clone)
       document.body.appendChild(printHost)
 
