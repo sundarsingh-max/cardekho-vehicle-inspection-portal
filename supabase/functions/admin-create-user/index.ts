@@ -24,10 +24,11 @@ Deno.serve(async (req) => {
   const { data: callerData, error: callerError } = await callerClient.auth.getUser()
   if (callerError || !callerData.user) return json({ error: 'Authentication required.' }, 401)
 
-  // Verify role from trusted app_metadata only. Never trust a role sent in request body.
-  if (callerData.user.app_metadata?.role !== 'Admin') return json({ error: 'Admin access required.' }, 403)
-
+  // Verify caller against the server-side profile table; never trust a role sent in the request body.
   const admin = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } })
+  const { data: callerProfile, error: callerProfileError } = await admin.from('user_profiles').select('role,is_active').eq('user_id', callerData.user.id).maybeSingle()
+  if (callerProfileError) return json({ error: 'Unable to verify Admin permissions.' }, 500)
+  if (!callerProfile || callerProfile.role !== 'Admin' || callerProfile.is_active !== true) return json({ error: 'Active Admin access required.' }, 403)
   let body: any
   try { body = await req.json() } catch { return json({ error: 'Invalid JSON body.' }, 400) }
 
