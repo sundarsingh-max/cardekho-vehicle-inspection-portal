@@ -64,6 +64,45 @@ const items = [
 
 function OperationalModule({ active, cases = [], locations = [], tpas = [], clients = [], onRefresh, role = 'Admin' }) {
   const [userForm, setUserForm] = useState({ full_name: '', email: '', role: 'Coordinator', temporary_password: '' })
+  const [masterForm, setMasterForm] = useState({ name: '', client_code: '', segment: 'CAR', make: '', model: '', variant: '', year: '', zone: '', state: '', city: '', is_active: true })
+  const [masterEditingId, setMasterEditingId] = useState(null)
+  const [masterSaving, setMasterSaving] = useState(false)
+  const masterTableByModule = { 'Client Master': 'clients', 'MMV Master': 'mmv_master', 'Location/Zone Master': 'location_master' }
+  const masterFieldsByModule = {
+    'Client Master': ['name', 'client_code', 'is_active'],
+    'MMV Master': ['segment', 'make', 'model', 'variant', 'year', 'is_active'],
+    'Location/Zone Master': ['zone', 'state', 'city', 'is_active'],
+  }
+  function resetMasterForm() { setMasterForm({ name: '', client_code: '', segment: 'CAR', make: '', model: '', variant: '', year: '', zone: '', state: '', city: '', is_active: true }); setMasterEditingId(null); setUserActionMessage(''); setUserActionError('') }
+  async function saveMasterRecord(e) {
+    e.preventDefault(); if (role !== 'Admin') return
+    const table = masterTableByModule[active]; const fields = masterFieldsByModule[active] || []
+    const payload = Object.fromEntries(fields.map(k => [k, k === 'is_active' ? Boolean(masterForm[k]) : (String(masterForm[k] ?? '').trim() || null)]))
+    if (active === 'Client Master' && !payload.name) { setUserActionError('Client name is required.'); return }
+    if (active === 'MMV Master' && (!payload.segment || !payload.make || !payload.model || !payload.variant)) { setUserActionError('Segment, Make, Model and Variant are required.'); return }
+    if (active === 'Location/Zone Master' && !payload.zone && !payload.city) { setUserActionError('Enter at least Zone or City.'); return }
+    setMasterSaving(true); setUserActionError(''); setUserActionMessage('')
+    try {
+      let result
+      if (masterEditingId != null) result = await supabase.from(table).update(payload).eq('id', masterEditingId)
+      else result = await supabase.from(table).insert(payload)
+      if (result.error) throw result.error
+      setUserActionMessage(masterEditingId != null ? 'Master record updated.' : 'Master record added.')
+      resetMasterForm(); setPage(1)
+      const { data, error: reloadError } = await supabase.from(table).select('*').limit(10000)
+      if (reloadError) throw reloadError
+      setRows(data || []); onRefresh?.()
+    } catch (err) { setUserActionError(err?.message || 'Could not save master record. Check table columns and Supabase permissions.') }
+    finally { setMasterSaving(false) }
+  }
+  function beginMasterEdit(row) { setMasterEditingId(row.id); setMasterForm(p => ({...p, ...row, is_active: row.is_active !== false})); setUserActionError(''); setUserActionMessage(''); window?.scrollTo?.({top:0,behavior:'smooth'}) }
+  async function deleteMasterRecord(row) {
+    if (role !== 'Admin' || !row.id || !window.confirm('Remove this master record? This cannot be undone.')) return
+    setMasterSaving(true); setUserActionError(''); setUserActionMessage('')
+    try { const {error:delError}=await supabase.from(masterTableByModule[active]).delete().eq('id',row.id); if(delError) throw delError; setRows(p=>p.filter(x=>x.id!==row.id)); setUserActionMessage('Master record removed.'); onRefresh?.() }
+    catch(err) { setUserActionError(err?.message || 'Could not remove record. Check Supabase permissions.') }
+    finally { setMasterSaving(false) }
+  }
   const [userActionBusy, setUserActionBusy] = useState(false)
   const [userActionMessage, setUserActionMessage] = useState('')
   const [userActionError, setUserActionError] = useState('')
@@ -182,6 +221,15 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
     <div className="module-heading"><div><h2>{title}</h2><p>{description}</p></div><button type="button" className="secondary" onClick={() => { setPage(1); setQuery(''); onRefresh?.(); }}>↻ Refresh</button></div>
     {active === 'MIS' && <div className="mis-cards">{[['Total Cases',cases.length],['Open',countStatus('OPEN')],['Assigned',countStatus('ASSIGNED')],['QC',countStatus('QC')],['QC Hold',countStatus('QC_HOLD')],['Pricing',countStatus('PRICING')],['Completed',countStatus('COMPLETED')]].map(([label,value])=><div className="mis-card" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>}
     {active === 'Help Desk' && <div className="helpdesk-content"><h3>How can we help?</h3><p>For a case issue, use Case Search to find the case and Audit Trail/History to review its activity.</p><p>Ticket submission is not connected yet because a help-desk ticket table is not present in the current schema.</p><button type="button" onClick={() => { navigator.clipboard?.writeText('CarDekho Vehicle Inspection Portal support request'); }}>Copy support subject</button></div>}
+    {masterTableByModule[active] && role === 'Admin' && <div className="user-admin-panel" style={{padding:18,border:'1px solid #dbe5f2',borderRadius:14,background:'linear-gradient(135deg,#ffffff,#f6f9ff)',marginBottom:18}}>
+      <h3 style={{display:'flex',alignItems:'center',gap:10,color:'#17345d',marginTop:0}}><span style={{display:'inline-grid',placeItems:'center',width:34,height:34,borderRadius:10,background:'#e5efff',color:'#1769e0',fontSize:20}}>{masterEditingId ? '✎' : '＋'}</span>{masterEditingId ? 'Edit Master Record' : 'Add New Record'} <span style={{fontSize:12,fontWeight:400,color:'#64748b'}}>Admin-only master management</span></h3>
+      <form onSubmit={saveMasterRecord} style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:14,alignItems:'end'}}>
+      {(masterFieldsByModule[active] || []).filter(k=>k!=='is_active').map(k=><label key={k}><span style={{display:'block',marginBottom:6}}>{k.replace(/_/g,' ').replace(/\\b\\w/g,m=>m.toUpperCase())}</span><input required={active==='Client Master'&&k==='name'||active==='MMV Master'&&['segment','make','model','variant'].includes(k)} value={masterForm[k] ?? ''} onChange={e=>setMasterForm(p=>({...p,[k]:e.target.value}))} placeholder={'Enter '+k.replace(/_/g,' ')} /></label>)}
+      <label style={{display:'flex',gap:8,alignItems:'center'}}><input type="checkbox" checked={Boolean(masterForm.is_active)} onChange={e=>setMasterForm(p=>({...p,is_active:e.target.checked}))} /> Active</label>
+      <div style={{display:'flex',gap:8,justifyContent:'flex-end',gridColumn:'1 / -1'}}><button type="button" className="secondary" onClick={resetMasterForm}>Cancel</button><button type="submit" disabled={masterSaving}>{masterSaving ? 'Saving…' : masterEditingId ? 'Save Changes' : '＋ Add Record'}</button></div>
+      </form>{userActionMessage && <p className="module-success">✓ {userActionMessage}</p>}{userActionError && <p className="module-error">⚠ {userActionError}</p>}
+      <p className="module-note">Saving requires the corresponding Supabase table and Admin write permissions.</p>
+    </div>}
     {active === 'Users' && role === 'Admin' && <div className="user-admin-panel" style={{padding:18,border:'1px solid #dbe5f2',borderRadius:14,background:'linear-gradient(135deg,#ffffff,#f6f9ff)',marginBottom:18}}>
       <h3 style={{display:'flex',alignItems:'center',gap:10,color:'#17345d',marginTop:0}}><span style={{display:'inline-grid',placeItems:'center',width:34,height:34,borderRadius:10,background:'#e5efff',color:'#1769e0',fontSize:20}}>＋</span> Add New User <span style={{fontSize:12,fontWeight:400,color:'#64748b'}}>Create an account and assign portal access</span></h3>
       <form onSubmit={createPortalUser} className="user-admin-form" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:14,alignItems:'end'}}>
@@ -197,7 +245,7 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
     </div>}
     {(['Case Search','Audit Trail','Client Master','MMV Master','Location/Zone Master','Users','Permissions'].includes(active)) && <>
       <input className="module-search" value={query} onChange={e=>{setQuery(e.target.value);setPage(1)}} placeholder={active === 'Case Search' ? 'Search case ID, registration, customer, mobile…' : 'Filter records…'} />
-      {busy ? <p>Loading records…</p> : error ? <p className="module-error">{error}</p> : <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h.replace(/_/g,' ').toUpperCase()}</th>)}{active === 'Users' && role === 'Admin' && <th>ACTIONS</th>}</tr></thead><tbody>{pageRows.map((row,i)=><tr key={row.id || row.user_id || row.case_id || i}>{headers.map(h=><td key={h}>{row[h] == null || row[h] === '' ? '—' : typeof row[h] === 'boolean' ? (row[h] ? 'Active' : 'Inactive') : String(row[h])}</td>)}{active === 'Users' && role === 'Admin' && <td className="user-row-actions" style={{minWidth:300,width:300,whiteSpace:'normal',overflow:'visible'}}>
+      {busy ? <p>Loading records…</p> : error ? <p className="module-error">{error}</p> : <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h.replace(/_/g,' ').toUpperCase()}</th>)}{(active === 'Users' || masterTableByModule[active] && role === 'Admin') && <th>ACTIONS</th>}</tr></thead><tbody>{pageRows.map((row,i)=><tr key={row.id || row.user_id || row.case_id || i}>{headers.map(h=><td key={h}>{row[h] == null || row[h] === '' ? '—' : typeof row[h] === 'boolean' ? (row[h] ? 'Active' : 'Inactive') : String(row[h])}</td>)}{masterTableByModule[active] && role === 'Admin' && <td style={{minWidth:150}}><div style={{display:'flex',gap:6}}><button type="button" title="Edit record" aria-label="Edit record" onClick={()=>beginMasterEdit(row)} style={{borderRadius:8,padding:'7px 10px'}}><Pencil size={15}/> Edit</button><button type="button" title="Remove record" aria-label="Remove record" disabled={masterSaving} onClick={()=>deleteMasterRecord(row)} style={{borderRadius:8,padding:'7px 10px',background:'#fff1f2',color:'#be123c'}}><X size={15}/> Remove</button></div></td>}{active === 'Users' && role === 'Admin' && <td className="user-row-actions" style={{minWidth:300,width:300,whiteSpace:'normal',overflow:'visible'}}>
         <div style={{display:'flex',flexWrap:'nowrap',alignItems:'center',gap:8,minWidth:285}}>
           <label title="Change user role" style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:11,color:'#334155',flexShrink:0}}><icon-placeholder /> <select aria-label="Change user role" value={row.role || 'Coordinator'} disabled={userActionBusy} onChange={e=>managePortalUser(row.user_id,'set_role',{role:e.target.value})} style={{minWidth:112,maxWidth:125,padding:'7px 8px',borderRadius:7,border:'1px solid #cbd5e1',background:'#fff'}}>{['Admin','Coordinator','TPA','QC','Pricing'].map(r=><option key={r}>{r}</option>)}</select></label>
           <button title={row.is_active ? 'Deactivate account' : 'Activate account'} aria-label={row.is_active ? 'Deactivate account' : 'Activate account'} type="button" disabled={userActionBusy || !row.user_id} onClick={()=>managePortalUser(row.user_id,row.is_active ? 'deactivate' : 'activate')} style={{display:'inline-flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:3,minWidth:62,minHeight:54,flexShrink:0,borderRadius:9,padding:'6px 7px',background:row.is_active?'#fff1f2':'#ecfdf5',color:row.is_active?'#be123c':'#047857',border:'1px solid '+(row.is_active?'#fecdd3':'#a7f3d0'),fontWeight:700,fontSize:10,whiteSpace:'nowrap',lineHeight:1.2}}><span aria-hidden="true" style={{fontSize:18,lineHeight:1}}>{row.is_active ? '⏻' : '✓'}</span><span>{row.is_active ? 'Deactivate' : 'Activate'}</span></button>
@@ -206,7 +254,7 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
       </td>}</tr>)}{!pageRows.length && <tr><td colSpan={headers.length}>{busy ? 'Loading…' : 'No records found in this table, or access is not granted by Supabase policies.'}</td></tr>}</tbody></table></div>}
       <div className="case-pagination"><span>Showing {filtered.length ? (page-1)*pageSize+1 : 0}–{Math.min(page*pageSize,filtered.length)} of {filtered.length}</span><div className="page-controls"><button disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Previous</button><span>Page {page} of {pages}</span><button disabled={page>=pages} onClick={()=>setPage(p=>Math.min(pages,p+1))}>Next</button></div></div>
     </>}
-    {['Client Master','MMV Master','Location/Zone Master','Users','Permissions'].includes(active) && <p className="module-note">Records are read from Supabase. Add/edit/remove controls are not enabled until authenticated Admin identity and server-side authorization are wired; this avoids exposing master deletion or role changes to ordinary users.</p>}
+    {['Client Master','MMV Master','Location/Zone Master','Users','Permissions'].includes(active) && <p className="module-note">Master changes are shown only to Admins. Supabase RLS must also enforce write permissions; client-side visibility alone is not a security boundary.</p>}
   </section>
 }
 function App({ role = 'Admin', userProfile = null }) {
