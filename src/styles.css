@@ -291,3 +291,18 @@ main > section.panel > div[style*="overflow-x: auto"] {
   main > section.panel table thead th,
   main > section.panel table tbody td { padding: 10px 9px; }
 }
+
+/* Dense case lists remain readable at scale */
+main > section.panel table { table-layout: auto; }
+main > section.panel table th, main > section.panel table td { border-right: 1px solid #e8edf4; }
+main > section.panel table th:last-child, main > section.panel table td:last-child { border-right: 0; }
+main > section.panel table tbody tr:last-child td { border-bottom: 1px solid #dce4ef; }
+main > section.panel table tbody td { font-size: 12px; overflow-wrap: anywhere; }
+main > section.panel table thead th { border-top: 1px solid #dce4ef; }
+.status { white-space: nowrap; }
+.case-pagination { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 2px 0; color:#64748b; font-size:12px; }
+.case-pagination .page-controls { display:flex; align-items:center; gap:6px; }
+.case-pagination button { display:inline-flex; align-items:center; justify-content:center; min-width:34px; height:34px; padding:0 10px; border:1px solid #dbe3ef; border-radius:8px; background:#fff; color:#334155; cursor:pointer; }
+.case-pagination button:disabled { opacity:.4; cursor:not-allowed; }
+.case-pagination button.current { background:#e31b23; color:#fff; border-color:#e31b23; }
+@media(max-width:700px) { .case-pagination { align-items:flex-start; flex-direction:column; } }
