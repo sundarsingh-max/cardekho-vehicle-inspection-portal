@@ -4105,56 +4105,36 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
           el.style.objectFit = 'contain'
         }
       })
+      // Convert editable controls to their CURRENT visible values before capture.
+      // Removing input/select/textarea outright was the reason PDF values disappeared.
+      clone.querySelectorAll('input, select, textarea').forEach(control => {
+        const tag = control.tagName.toLowerCase()
+        let value = ''
+        if (tag === 'select') {
+          value = control.selectedOptions?.[0]?.textContent || control.value || ''
+        } else if (control.type === 'checkbox' || control.type === 'radio') {
+          value = control.checked ? 'Yes' : 'No'
+        } else {
+          value = control.value || control.getAttribute('value') || ''
+        }
+        const printable = document.createElement('div')
+        printable.textContent = value || '—'
+        printable.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;min-height:1em;box-sizing:border-box;color:#111;background:transparent;font:inherit;line-height:1.35;padding:2px 3px;border:0;'
+        const computed = window.getComputedStyle(control)
+        printable.style.textAlign = computed.textAlign
+        printable.style.width = control.style.width || '100%'
+        if (tag === 'textarea') printable.style.minHeight = `${Math.max(1, (value.match(/\n/g) || []).length + 1) * 1.35}em`
+        control.replaceWith(printable)
+      })
       // Photo previews are wrapped in buttons for click-to-zoom. Unwrap those
       // buttons before PDF capture so the IMG elements remain in the report.
       clone.querySelectorAll('button').forEach(button => {
-        if (button.querySelector('img')) {
-          button.replaceWith(...Array.from(button.childNodes))
-        } else {
-          button.remove()
-        }
+        if (button.querySelector('img')) button.replaceWith(...Array.from(button.childNodes))
+        else button.remove()
       })
-      clone.querySelectorAll('input, select, textarea, [data-no-pdf="true"]').forEach(el => el.remove())
+      clone.querySelectorAll('[data-no-pdf="true"]').forEach(el => el.remove())
       printHost.appendChild(clone)
       document.body.appendChild(printHost)
-
-      // Copy live React-controlled field values into the cloned report.
-      // cloneNode() copies HTML attributes, but not the current value of inputs,
-      // selected options, or textarea content. Without this, the PDF shows labels
-      // while all user-entered values disappear.
-      clone.querySelectorAll('input, select, textarea').forEach(control => {
-        if (control.matches('[data-no-pdf="true"]') || control.type === 'file') {
-          control.remove()
-          return
-        }
-        const computed = window.getComputedStyle(control)
-        const printed = document.createElement('div')
-        printed.textContent = control.tagName === 'SELECT'
-          ? (control.selectedOptions?.[0]?.textContent || control.value || '—')
-          : control.tagName === 'TEXTAREA'
-            ? (control.value || ' ')
-            : (control.type === 'checkbox' || control.type === 'radio')
-              ? (control.checked ? 'Yes' : 'No')
-              : (control.value || '—')
-        printed.style.cssText = [
-          'box-sizing:border-box',
-          'display:flex',
-          'align-items:center',
-          'white-space:pre-wrap',
-          'overflow-wrap:anywhere',
-          'width:100%',
-          `min-height:${computed.height === 'auto' ? '22px' : computed.height}`,
-          `padding:${computed.padding}`,
-          `font:${computed.font}`,
-          `font-size:${computed.fontSize}`,
-          `line-height:${computed.lineHeight}`,
-          `color:${computed.color}`,
-          `background:${computed.backgroundColor === 'rgba(0, 0, 0, 0)' ? '#fff' : computed.backgroundColor}`,
-          `border:${computed.border}`,
-          `border-radius:${computed.borderRadius}`
-        ].join(';')
-        control.replaceWith(printed)
-      })
 
       // Wait for every photo to load/decode before capturing the report.
       const imgs = Array.from(clone.querySelectorAll('img'))
@@ -4170,17 +4150,17 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         setTimeout(done, 15000)
       })))
 
-      // Capture at print-quality resolution. Previous sub-1x scales were
-      // effectively screen-resolution and produced visibly blurred PDFs.
+      // Start with print-quality rasterization. The old sub-1x scale and low
+      // JPEG quality made small text, logos and inspection photos visibly blurry.
       const attempts = [
-        { scale: 1.8, quality: 0.92 },
-        { scale: 1.5, quality: 0.90 },
-        { scale: 1.25, quality: 0.88 }
+        { scale: 2.0, quality: 0.94 },
+        { scale: 1.6, quality: 0.90 },
+        { scale: 1.35, quality: 0.86 }
       ]
       let finalBlob = null
       let finalDoc = null
       for (const attempt of attempts) {
-        setPdfMessage(`Rendering report and photos at print quality (${Math.round(attempt.scale * 100)}% scale)...`)
+        setPdfMessage(`Rendering report and photos at high resolution (${Math.round(attempt.scale * 100)}% scale)...`)
         const canvas = await window.html2canvas(clone, {
           scale: attempt.scale,
           useCORS: true,
@@ -4233,11 +4213,11 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         finalBlob = blob
         finalDoc = pdf
         if (canvas.toDataURL) canvas.width = 1 // release the large canvas buffer before the next attempt
-        if (finalBlob.size <= 12 * 1024 * 1024) break
+        if (finalBlob.size <= 10 * 1024 * 1024) break
       }
       if (!finalBlob || !finalDoc) throw new Error('Unable to generate PDF.')
       const path = `${caseItem.case_id}/${Date.now()}_inspection_report.pdf`
-      setPdfMessage('Uploading complete PDF with photos...')
+      setPdfMessage('Uploading high-resolution PDF with report values and photos...')
       const upload = await supabase.storage.from('inspection-reports').upload(path, finalBlob, {
         contentType: 'application/pdf',
         upsert: true
