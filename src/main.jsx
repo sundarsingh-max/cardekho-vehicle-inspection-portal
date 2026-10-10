@@ -1458,7 +1458,20 @@ function App({ role = 'Admin', userProfile = null }) {
       if (error) throw new Error(error.message)
     }
     if (writeAudit) {
-      const { error: auditError } = await supabase.from('audit_trail').insert({ case_id: item.case_id, action: 'Report Saved', stage: stage || active, old_status: item.status || null, new_status: item.status || null, remarks: `Master report saved from ${stage || active}`, user_id: null, user_name: 'SS Sundar Singh', role: 'Admin' })
+      // Attribute report-save events to the currently authenticated portal profile;
+      // never stamp every user's action as a hard-coded Admin identity.
+      const auditPayload = {
+        case_id: item.case_id,
+        action: 'Report Saved',
+        stage: stage || active,
+        old_status: item.status || null,
+        new_status: item.status || null,
+        remarks: `Master report saved from ${stage || active}`,
+        user_id: userProfile?.user_id || null,
+        user_name: userProfile?.full_name || userProfile?.email || 'Portal User',
+        role: role || 'Unknown'
+      }
+      const { error: auditError } = await supabase.from('audit_trail').insert(auditPayload)
       if (auditError) console.warn('Report audit:', auditError.message)
     }
   }
