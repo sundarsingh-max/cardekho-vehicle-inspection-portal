@@ -4204,6 +4204,42 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         })
       })
 
+      // PDF-only photo cards: enlarge the grid, remove upload/file rows, and add a clickable View label.
+      const pdfPhotoTargets = []
+      Array.from(clone.querySelectorAll('div')).forEach(card => {
+        if (!card.querySelector('img')) return
+        const children = Array.from(card.children)
+        if (children.length < 2) return
+        const title = (children[0]?.textContent || '').trim()
+        const img = card.querySelector('img')
+        if (!title || !img) return
+        if (!/^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VinPlate Photo|Chassis Imprint|Chassis Number Pencil Tracing)$/i.test(title)) return
+        const src = img.currentSrc || img.src || img.getAttribute('src') || ''
+        if (!src) return
+        card.style.setProperty('min-height', '150px', 'important')
+        card.style.setProperty('padding', '6px', 'important')
+        card.style.setProperty('box-sizing', 'border-box', 'important')
+        img.style.setProperty('max-height', '108px', 'important')
+        img.style.setProperty('height', '108px', 'important')
+        img.style.setProperty('width', '100%', 'important')
+        img.style.setProperty('object-fit', 'contain', 'important')
+        const parent = card.parentElement
+        if (parent) {
+          const siblings = Array.from(parent.children).filter(el => el.querySelector && el.querySelector('img'))
+          if (siblings.length >= 2) {
+            parent.style.setProperty('grid-template-columns', 'repeat(3, minmax(0, 1fr))', 'important')
+            parent.style.setProperty('gap', '8px', 'important')
+          }
+        }
+        const view = document.createElement('a')
+        view.href = src
+        view.textContent = 'View'
+        view.setAttribute('aria-label', `View full-size ${title}`)
+        view.style.cssText = 'display:block;text-align:right;color:#1265d8;font:9px Arial,sans-serif;text-decoration:underline;margin-top:4px;cursor:pointer;'
+        card.appendChild(view)
+        pdfPhotoTargets.push({ element: view, url: src })
+      })
+
       // PDF-only media shortcut area: remove the entire Exterior Video section
       // (heading, video preview, filename, upload/replace controls and text links)
       // and put only the two icon tiles in its place. The live portal is untouched.
@@ -4222,37 +4258,16 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         }
         exteriorAncestor = exteriorAncestor.parentElement
       }
-      if (!exteriorSection) {
-        const videoHint = Array.from(clone.querySelectorAll('*')).find(el =>
-          el.children.length === 0 && /Only exterior inspection video is allowed/i.test(el.textContent || '')
-        )
-        let candidate = videoHint || exteriorTitle
-        // Walk upward to the nearest wrapper that contains both the video upload
-        // instructions and its Replace/Upload control, so the complete box is replaced.
-        while (candidate && candidate !== clone) {
-          const text = candidate.textContent || ''
-          if (/Exterior Video/i.test(text) &&
-              /Only exterior inspection video is allowed/i.test(text) &&
-              /Replace Video|Upload Exterior Video/i.test(text)) {
-            exteriorSection = candidate
-            break
-          }
-          candidate = candidate.parentElement
-        }
-      }
+      if (!exteriorSection && exteriorTitle) exteriorSection = exteriorTitle.parentElement?.parentElement || null
       const pdfLinkTargets = []
       const linksWrap = document.createElement('div')
       linksWrap.style.cssText = 'display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap;margin-top:10px;padding:8px 0;font-family:Arial,sans-serif;'
-      const exteriorVideoData = form.exteriorVideo || form.videos?.exteriorVideo || form.videos?.['Exterior Video'] || form.media?.exteriorVideo || null
-      const videoUrl = typeof exteriorVideoData === 'string'
-        ? exteriorVideoData
-        : (exteriorVideoData?.publicUrl || exteriorVideoData?.signedUrl || exteriorVideoData?.url || exteriorVideoData?.previewUrl || exteriorVideoData?.dataUrl || exteriorVideoData?.src || '')
+      const exteriorVideoData = form.exteriorVideo || form.videos?.exteriorVideo || form.videos?.['Exterior Video'] || null
+      const videoUrl = typeof exteriorVideoData === 'string' ? exteriorVideoData : (exteriorVideoData?.publicUrl || exteriorVideoData?.signedUrl || exteriorVideoData?.url || exteriorVideoData?.previewUrl || '')
       const makeTile = (kind, label, url) => {
         if (!url) return
         const a = document.createElement('a')
         a.href = url
-        a.target = '_blank'
-        a.rel = 'noopener noreferrer'
         a.setAttribute('aria-label', label)
         a.style.cssText = 'width:94px;height:66px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:4px;color:#6b7280;text-decoration:none;font-family:Arial,sans-serif;font-size:8px;font-weight:400;text-align:center;cursor:pointer;padding:0 2px;box-sizing:border-box;position:relative;z-index:2;'
         if (kind === 'video') {
@@ -4265,38 +4280,12 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       }
       makeTile('video', 'Download Exterior video', videoUrl)
       makeTile('images', 'Download images', photoZipUrl)
-      if (exteriorSection?.parentNode) {
-        // PDF only: replace the whole upload card with the two download tiles.
+      if (exteriorSection?.parentNode && linksWrap.children.length) {
         exteriorSection.replaceWith(linksWrap)
-      } else {
-        // Do not append the tiles to the last page. If markup differs, remove all
-        // Exterior Video upload UI from the PDF clone and place the tiles near the
-        // first matching Exterior Video heading instead.
-        const fallbackTitle = Array.from(clone.querySelectorAll('*')).find(el =>
-          el.children.length === 0 && (el.textContent || '').trim() === 'Exterior Video'
-        )
-        if (fallbackTitle) {
-          let target = fallbackTitle
-          while (target.parentElement && target.parentElement !== clone &&
-                 (target.parentElement.textContent || '').length < 5000) {
-            if (target.parentElement.querySelector('input[type="file"], video') ||
-                /Replace Video|Only exterior inspection video is allowed/i.test(target.parentElement.textContent || '')) {
-              target = target.parentElement
-              break
-            }
-            target = target.parentElement
-          }
-          target.replaceWith(linksWrap)
-        } else {
-          // If the section cannot be located, hide all video-upload UI in the PDF
-          // rather than reintroducing it or placing links on the last page.
-          Array.from(clone.querySelectorAll('*')).forEach(el => {
-            if (el.children.length === 0 && /Only exterior inspection video is allowed|Replace Video|WhatsApp Video/i.test(el.textContent || '')) {
-              const box = el.closest('section, article, fieldset, [class*="card"], [class*="section"]') || el.parentElement
-              box?.remove()
-            }
-          })
-        }
+      } else if (linksWrap.children.length) {
+        // Fallback: place shortcuts at the end of the report clone, without adding
+        // an extra page or restoring any of the original video-section content.
+        clone.appendChild(linksWrap)
       }
       printHost.appendChild(clone)
       document.body.appendChild(printHost)
@@ -4365,15 +4354,20 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         // Add real PDF URI annotations over each icon tile. The page content is rasterized,
         // so clickable links must be added separately as PDF annotations.
         const cloneRect = clone.getBoundingClientRect()
+        const margin = 7
+        const pageWidth = 210
+        const pageHeight = 297
+        const usableWidth = pageWidth - margin * 2
+        const usableHeight = pageHeight - margin * 2
         const cssPxPerMm = 794 / usableWidth
         const cssPageHeight = usableHeight * cssPxPerMm
-        for (const target of pdfLinkTargets) {
+        for (const target of [...pdfLinkTargets, ...pdfPhotoTargets]) {
           if (!target.url) continue
           const rect = target.element.getBoundingClientRect()
           const leftPx = Math.max(0, rect.left - cloneRect.left - 2)
           const topPx = Math.max(0, rect.top - cloneRect.top - 2)
-          const widthPx = Math.max(rect.width + 4, 94)
-          const heightPx = Math.max(rect.height + 4, 66)
+          const widthPx = Math.max(rect.width + 4, target.element.getAttribute('aria-label')?.startsWith('View full-size') ? 34 : 94)
+          const heightPx = Math.max(rect.height + 4, target.element.getAttribute('aria-label')?.startsWith('View full-size') ? 16 : 66)
           const pageIndex = Math.floor(topPx / cssPageHeight)
           const yInSlice = topPx - pageIndex * cssPageHeight
           if (pageIndex >= 0 && pageIndex < pdf.getNumberOfPages()) {
