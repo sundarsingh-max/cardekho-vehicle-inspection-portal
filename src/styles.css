@@ -317,3 +317,8 @@ main > section.panel table thead th { border-top: 1px solid #dce4ef; }
 .report-action.danger { color:#b91c1c; background:#fff7f7; border-color:#fecaca; }
 .report-row-actions .report-action svg { display:block; flex-shrink:0; }
 @media(max-width:900px) { .report-row-actions { flex-wrap:wrap; } }
+
+/* Compact contact details in Assign/Reassign case tables */
+.case-person-cell { display:flex; flex-direction:column; gap:3px; min-width:130px; line-height:1.3; }
+.case-person-cell strong { color:#172554; font-size:13px; font-weight:650; overflow-wrap:anywhere; }
+.case-person-cell small { color:#64748b; font-size:12px; white-space:nowrap; }
