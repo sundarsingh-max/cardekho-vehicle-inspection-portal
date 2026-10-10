@@ -4087,6 +4087,26 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       printHost = document.createElement('div')
       printHost.style.cssText = 'position:fixed;left:-20000px;top:0;width:794px;background:#fff;z-index:-1;overflow:visible;'
       const clone = source.cloneNode(true)
+      // cloneNode() does not reliably copy live React-controlled form state.
+      // Mirror the live DOM values into the cloned controls before converting them to text.
+      const liveControls = Array.from(source.querySelectorAll('input, select, textarea'))
+      const clonedControls = Array.from(clone.querySelectorAll('input, select, textarea'))
+      liveControls.forEach((live, index) => {
+        const copy = clonedControls[index]
+        if (!copy) return
+        if (live.tagName === 'SELECT') {
+          copy.selectedIndex = live.selectedIndex
+          Array.from(copy.options).forEach((option, optionIndex) => {
+            option.selected = Boolean(live.options[optionIndex]?.selected)
+          })
+        } else if (live.type === 'checkbox' || live.type === 'radio') {
+          copy.checked = live.checked
+        } else {
+          copy.value = live.value
+          copy.setAttribute('value', live.value)
+          if (live.tagName === 'TEXTAREA') copy.textContent = live.value
+        }
+      })
       clone.style.width = '794px'
       clone.style.maxWidth = '794px'
       clone.style.minWidth = '794px'
@@ -4125,6 +4145,22 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         printable.style.width = control.style.width || '100%'
         if (tag === 'textarea') printable.style.minHeight = `${Math.max(1, (value.match(/\n/g) || []).length + 1) * 1.35}em`
         control.replaceWith(printable)
+      })
+      // The live portal has a large video player for playback. In the PDF,
+      // replace it with a compact text link instead of printing the empty player box.
+      clone.querySelectorAll('video').forEach(video => {
+        const url = video.getAttribute('src') || video.currentSrc || ''
+        const wrapper = video.parentElement
+        if (wrapper) {
+          const link = document.createElement('a')
+          link.href = url
+          link.textContent = '▶ Play / Open Video'
+          link.style.cssText = 'display:inline-block;color:#1d4ed8;font-size:10px;font-weight:700;text-decoration:underline;padding:3px 0;'
+          wrapper.replaceChildren(link)
+          wrapper.style.cssText = 'border:0;background:transparent;padding:0;margin:4px 0;min-height:0;height:auto;'
+        } else {
+          video.remove()
+        }
       })
       // Photo previews are wrapped in buttons for click-to-zoom. Unwrap those
       // buttons before PDF capture so the IMG elements remain in the report.
@@ -4813,20 +4849,18 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         </div>
 
       {photoViewer && (
-        <div onClick={() => setPhotoViewer(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div onClick={() => { setPhotoViewer(null); setPhotoZoom(1) }} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
           <div onClick={e => e.stopPropagation()} style={{ position: 'relative', width: 'min(95vw, 1100px)', height: 'min(90vh, 800px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             <button type="button" onClick={() => setPhotoViewer(null)} style={{ position: 'absolute', top: 0, right: 0, zIndex: 2, width: 34, height: 34, borderRadius: '50%', border: 'none', background: '#fff', color: '#111', fontSize: 22, cursor: 'pointer' }}>×</button>
             <div style={{ color: '#fff', fontWeight: 700, marginBottom: 8 }}>{photoViewer.name}</div>
-            <div onWheel={e => { if (['TPA QC','QC','QC Hold'].includes(mode)) { e.preventDefault(); setPhotoZoom(z => Math.max(0.5, Math.min(3, Number((z + (e.deltaY < 0 ? 0.15 : -0.15)).toFixed(2))))) } }} style={{ maxWidth: '100%', maxHeight: 'calc(100% - 70px)', overflow: 'auto', background: '#111', padding: 10, cursor: ['TPA QC','QC','QC Hold'].includes(mode) ? 'zoom-in' : 'default' }}>
+            <div onWheel={e => { e.preventDefault(); setPhotoZoom(z => Math.max(0.5, Math.min(4, Number((z + (e.deltaY < 0 ? 0.15 : -0.15)).toFixed(2))))) }} style={{ maxWidth: '100%', maxHeight: 'calc(100% - 70px)', overflow: 'auto', background: '#111', padding: 10, cursor: 'zoom-in' }}>
               <img src={photoViewer.src} alt={photoViewer.name} style={{ maxWidth: 'none', width: `${Math.round(700 * photoZoom)}px`, height: 'auto', display: 'block' }} />
             </div>
-            {['TPA QC','QC','QC Hold'].includes(mode) && (
-              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                <button type="button" onClick={() => setPhotoZoom(z => Math.min(3, Number((z + 0.25).toFixed(2))))}>Zoom In +</button>
-                <button type="button" onClick={() => setPhotoZoom(z => Math.max(0.5, Number((z - 0.25).toFixed(2))))}>Zoom Out −</button>
-                <button type="button" onClick={() => setPhotoZoom(1)}>Reset</button>
-              </div>
-            )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button type="button" onClick={() => setPhotoZoom(z => Math.min(4, Number((z + 0.25).toFixed(2))))}>Zoom In +</button>
+              <button type="button" onClick={() => setPhotoZoom(z => Math.max(0.5, Number((z - 0.25).toFixed(2))))}>Zoom Out −</button>
+              <button type="button" onClick={() => setPhotoZoom(1)}>Reset</button>
+            </div>
           </div>
         </div>
       )}
