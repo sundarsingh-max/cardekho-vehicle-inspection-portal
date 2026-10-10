@@ -4195,30 +4195,38 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         })
       }
 
-      // Put the two working media links inside the existing Exterior Video section
-      // in the PDF itself. Do not create an extra downloads page.
-      const videoPanel = Array.from(clone.querySelectorAll('div')).find(el => el.children.length > 0 && /Exterior Video \(Max 59s\)/i.test(el.textContent || '') && el.querySelector('video'))
+      // Add links only to the PDF clone inside the existing Exterior Video section.
+      // These links are intentionally not rendered in the live portal UI.
+      // Find the actual Exterior Video card by its heading, then walk upward to
+      // the smallest ancestor containing the video preview. This prevents the
+      // links from being appended to a large outer report container/footer.
+      const videoHeading = Array.from(clone.querySelectorAll('*')).find(el => el.children.length === 0 && /^Exterior Video \(Max 59s\)$/i.test((el.textContent || '').trim()))
+      let videoPanel = videoHeading?.parentElement || null
+      while (videoPanel && !videoPanel.querySelector('video') && videoPanel !== clone) videoPanel = videoPanel.parentElement
       const pdfLinkTargets = []
       if (videoPanel) {
+        // PDF-only compact icon tiles, matching the user's reference images.
+        // The visible icon/label is rasterized into the PDF and a real PDF link
+        // annotation is overlaid afterward so the whole tile is clickable.
         const linksWrap = document.createElement('div')
-        linksWrap.style.cssText = 'display:flex;gap:18px;flex-wrap:wrap;margin-top:6px;font-size:10px;'
+        linksWrap.style.cssText = 'display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;margin-top:8px;padding:3px 0;font-family:Arial,sans-serif;'
         const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl || form.exteriorVideo?.signedUrl || ''
-        if (videoUrl) {
+        const makeTile = (kind, label, url) => {
+          if (!url) return
           const a = document.createElement('a')
-          a.href = videoUrl
-          a.textContent = '▶ Play / Open Exterior Inspection Video'
-          a.style.cssText = 'color:#1d4ed8;text-decoration:underline;font-weight:700;'
+          a.href = url
+          a.setAttribute('aria-label', label)
+          a.style.cssText = 'width:78px;min-height:70px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:5px;color:#6b7280;text-decoration:none;font-size:8px;font-weight:400;text-align:center;cursor:pointer;padding:3px 2px;box-sizing:border-box;'
+          if (kind === 'video') {
+            a.innerHTML = '<svg width="38" height="38" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="3.5" y="3.5" width="24" height="29" rx="4" fill="#fff" stroke="#ff563f" stroke-width="1.8"/><path d="M13 11.5 L13 24 L22 17.8 Z" fill="#fff" stroke="#ff563f" stroke-width="1.5" stroke-linejoin="round"/><circle cx="29" cy="29" r="8" fill="#fff" stroke="#ff563f" stroke-width="1.8"/><path d="M29 24.5 V29 L32 31" fill="none" stroke="#ff563f" stroke-width="1.5" stroke-linecap="round"/></svg><span>Download Exterior video</span>'
+          } else {
+            a.innerHTML = '<svg width="38" height="38" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><path d="M3 10.5 H15 L18.5 14 H37 V33 H3 Z" fill="#f5b12b" stroke="#d18a12" stroke-width="1"/><path d="M3 14 H37 V33 H3 Z" fill="#ffc64b" stroke="#d18a12" stroke-width="1"/><path d="M3 18 H37 V33 H3 Z" fill="#f4a51c"/><path d="M3 10.5 H15 L18.5 14 H37 V18 H3 Z" fill="#ffd36c"/></svg><span>Download images</span>'
+          }
           linksWrap.appendChild(a)
-          pdfLinkTargets.push({ element: a, url: videoUrl })
+          pdfLinkTargets.push({ element: a, url })
         }
-        if (photoZipUrl) {
-          const a = document.createElement('a')
-          a.href = photoZipUrl
-          a.textContent = '↓ Download All Inspection Photos (ZIP)'
-          a.style.cssText = 'color:#1d4ed8;text-decoration:underline;font-weight:700;'
-          linksWrap.appendChild(a)
-          pdfLinkTargets.push({ element: a, url: photoZipUrl })
-        }
+        makeTile('video', 'Download Exterior video', videoUrl)
+        makeTile('images', 'Download images', photoZipUrl)
         if (linksWrap.children.length) videoPanel.appendChild(linksWrap)
       }
       printHost.appendChild(clone)
@@ -4292,8 +4300,8 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
           const cloneRect = clone.getBoundingClientRect()
           const leftPx = rect.left - cloneRect.left
           const topPx = rect.top - cloneRect.top
-          const widthPx = Math.max(rect.width, 20)
-          const heightPx = Math.max(rect.height, 10)
+          const widthPx = Math.max(rect.width, target.element.textContent.length * 5.2, 100)
+          const heightPx = Math.max(rect.height, 12)
           const pageWidth = 210
           const pageHeight = 297
           const margin = 7
@@ -4851,8 +4859,6 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
                   <div style={{ marginTop: 5, fontSize: 9, color: '#555' }}>
                     {videoItem.name || 'Exterior Video'} · {videoItem.duration ? `${videoItem.duration}s · ` : ''}{(Number(videoItem.size || 0) / (1024 * 1024)).toFixed(1)} MB{videoItem.recoveredFromStorage ? ' · Recovered from Storage' : ''}
                   </div>
-                  {(videoItem.url || videoItem.publicUrl) && <a href={videoItem.url || videoItem.publicUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 5, marginRight: 18, fontSize: 10, color: '#1d4ed8', fontWeight: 700 }}>▶ Play / Open Exterior Inspection Video</a>}
-                  {videoItem.photoZipUrl && <a href={videoItem.photoZipUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 5, fontSize: 10, color: '#1d4ed8', fontWeight: 700 }}>↓ Download All Inspection Photos (ZIP)</a>}
                 </div>
               )}
 
