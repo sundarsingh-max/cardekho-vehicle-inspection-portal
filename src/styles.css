@@ -347,3 +347,12 @@ main > section.panel table thead th { border-top: 1px solid #dce4ef; }
 .operational-module .page-controls button { padding:7px 11px; border:1px solid #cbd5e1; border-radius:7px; background:#fff; color:#334155; cursor:pointer; }
 .operational-module .page-controls button:disabled { opacity:.45; cursor:not-allowed; }
 @media(max-width:640px) { .operational-module { padding:12px; } .module-heading { flex-direction:column; } .operational-module .case-pagination { align-items:flex-start; flex-direction:column; } }
+
+
+/* Secure authentication gate */
+.auth-shell{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:linear-gradient(135deg,#f3f6fb,#e8edf5)}
+.auth-card{width:min(100%,430px);background:#fff;border:1px solid #dce3ed;border-radius:18px;padding:30px;box-shadow:0 18px 50px rgba(15,35,65,.12);display:flex;flex-direction:column;gap:15px}
+.auth-brand{font-size:23px;font-weight:800;color:#e43b25;letter-spacing:-.5px}.auth-brand span{display:block;color:#526174;font-size:11px;letter-spacing:2px;margin-top:3px}
+.auth-card h1{font-size:25px;margin:5px 0 0;color:#15243a}.auth-card p{color:#64748b;margin:0;line-height:1.5}.auth-field{display:flex;flex-direction:column;gap:7px;font-size:13px;font-weight:650;color:#334155}.auth-field input{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:9px;padding:12px 13px;font:inherit;font-weight:400;outline:none}.auth-field input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+.auth-submit{border:0;border-radius:9px;background:#e43b25;color:#fff;font-weight:750;padding:13px;cursor:pointer}.auth-submit:disabled{opacity:.6;cursor:wait}.auth-error{padding:11px 12px;border-radius:8px;background:#fff1f0;border:1px solid #fecaca;color:#991b1b;font-size:13px;overflow-wrap:anywhere}.auth-card small{color:#64748b;line-height:1.45}.auth-link{background:transparent;border:0;color:#475569;cursor:pointer;padding:8px}
+.auth-session-bar{display:flex;justify-content:flex-end;align-items:center;gap:14px;padding:8px 18px;background:#fff;border-bottom:1px solid #e2e8f0;font-size:12px;color:#475569}.auth-session-bar button{border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:6px 10px;cursor:pointer}
