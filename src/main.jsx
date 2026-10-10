@@ -62,7 +62,37 @@ const items = [
 ]
 
 
-function OperationalModule({ active, cases = [], locations = [], tpas = [], clients = [], onRefresh }) {
+function OperationalModule({ active, cases = [], locations = [], tpas = [], clients = [], onRefresh, role = 'Admin' }) {
+  const [userForm, setUserForm] = useState({ full_name: '', email: '', role: 'Coordinator', temporary_password: '' })
+  const [userActionBusy, setUserActionBusy] = useState(false)
+  const [userActionMessage, setUserActionMessage] = useState('')
+  const [userActionError, setUserActionError] = useState('')
+  async function callUserAdminFunction(functionName, payload) {
+    const { data, error } = await supabase.functions.invoke(functionName, { body: payload })
+    if (error) throw new Error(error.message || 'Admin action failed. Check whether the Supabase Edge Function is deployed.')
+    if (data?.error) throw new Error(data.error)
+    return data
+  }
+  async function createPortalUser(e) {
+    e.preventDefault()
+    setUserActionBusy(true); setUserActionMessage(''); setUserActionError('')
+    try {
+      await callUserAdminFunction('admin-create-user', userForm)
+      setUserActionMessage('User created. Share the temporary password securely; the user must change it at first login.')
+      setUserForm({ full_name: '', email: '', role: 'Coordinator', temporary_password: '' })
+      onRefresh?.()
+    } catch (err) { setUserActionError(err?.message || 'Unable to create user.') }
+    finally { setUserActionBusy(false) }
+  }
+  async function managePortalUser(userId, action, extra = {}) {
+    setUserActionBusy(true); setUserActionMessage(''); setUserActionError('')
+    try {
+      await callUserAdminFunction('admin-manage-user', { user_id: userId, action, ...extra })
+      setUserActionMessage('User updated successfully.')
+      onRefresh?.()
+    } catch (err) { setUserActionError(err?.message || 'Unable to update user.') }
+    finally { setUserActionBusy(false) }
+  }
   const [query, setQuery] = useState('')
   const [rows, setRows] = useState([])
   const [busy, setBusy] = useState(false)
@@ -152,9 +182,22 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
     <div className="module-heading"><div><h2>{title}</h2><p>{description}</p></div><button type="button" className="secondary" onClick={() => { setPage(1); setQuery(''); onRefresh?.(); }}>↻ Refresh</button></div>
     {active === 'MIS' && <div className="mis-cards">{[['Total Cases',cases.length],['Open',countStatus('OPEN')],['Assigned',countStatus('ASSIGNED')],['QC',countStatus('QC')],['QC Hold',countStatus('QC_HOLD')],['Pricing',countStatus('PRICING')],['Completed',countStatus('COMPLETED')]].map(([label,value])=><div className="mis-card" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>}
     {active === 'Help Desk' && <div className="helpdesk-content"><h3>How can we help?</h3><p>For a case issue, use Case Search to find the case and Audit Trail/History to review its activity.</p><p>Ticket submission is not connected yet because a help-desk ticket table is not present in the current schema.</p><button type="button" onClick={() => { navigator.clipboard?.writeText('CarDekho Vehicle Inspection Portal support request'); }}>Copy support subject</button></div>}
+    {active === 'Users' && role === 'Admin' && <div className="user-admin-panel">
+      <h3>Add User</h3>
+      <form onSubmit={createPortalUser} className="user-admin-form">
+        <label>Full name<input required value={userForm.full_name} onChange={e=>setUserForm(p=>({...p,full_name:e.target.value}))} /></label>
+        <label>Email<input required type="email" value={userForm.email} onChange={e=>setUserForm(p=>({...p,email:e.target.value}))} /></label>
+        <label>Role<select value={userForm.role} onChange={e=>setUserForm(p=>({...p,role:e.target.value}))}>{['Admin','Coordinator','TPA','QC','Pricing'].map(r=><option key={r}>{r}</option>)}</select></label>
+        <label>Temporary password (min 12 chars)<input required minLength={12} type="password" autoComplete="new-password" value={userForm.temporary_password} onChange={e=>setUserForm(p=>({...p,temporary_password:e.target.value}))} /></label>
+        <button type="submit" disabled={userActionBusy}>{userActionBusy ? 'Please wait…' : 'Create User'}</button>
+      </form>
+      {userActionMessage && <p className="module-success">{userActionMessage}</p>}
+      {userActionError && <p className="module-error">{userActionError}</p>}
+      <p className="module-note">Requires the secure admin-create-user and admin-manage-user Supabase Edge Functions to be deployed. The browser never receives the service-role key.</p>
+    </div>}
     {(['Case Search','Audit Trail','Client Master','MMV Master','Location/Zone Master','Users','Permissions'].includes(active)) && <>
       <input className="module-search" value={query} onChange={e=>{setQuery(e.target.value);setPage(1)}} placeholder={active === 'Case Search' ? 'Search case ID, registration, customer, mobile…' : 'Filter records…'} />
-      {busy ? <p>Loading records…</p> : error ? <p className="module-error">{error}</p> : <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h.replace(/_/g,' ').toUpperCase()}</th>)}</tr></thead><tbody>{pageRows.map((row,i)=><tr key={row.id || row.user_id || row.case_id || i}>{headers.map(h=><td key={h}>{row[h] == null || row[h] === '' ? '—' : typeof row[h] === 'boolean' ? (row[h] ? 'Active' : 'Inactive') : String(row[h])}</td>)}</tr>)}{!pageRows.length && <tr><td colSpan={headers.length}>{busy ? 'Loading…' : 'No records found in this table, or access is not granted by Supabase policies.'}</td></tr>}</tbody></table></div>}
+      {busy ? <p>Loading records…</p> : error ? <p className="module-error">{error}</p> : <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h.replace(/_/g,' ').toUpperCase()}</th>)}{active === 'Users' && role === 'Admin' && <th>ACTIONS</th>}</tr></thead><tbody>{pageRows.map((row,i)=><tr key={row.id || row.user_id || row.case_id || i}>{headers.map(h=><td key={h}>{row[h] == null || row[h] === '' ? '—' : typeof row[h] === 'boolean' ? (row[h] ? 'Active' : 'Inactive') : String(row[h])}</td>)}{active === 'Users' && role === 'Admin' && <td className="user-row-actions"><select aria-label="Change user role" value={row.role || 'Coordinator'} disabled={userActionBusy} onChange={e=>managePortalUser(row.user_id,'set_role',{role:e.target.value})}>{['Admin','Coordinator','TPA','QC','Pricing'].map(r=><option key={r}>{r}</option>)}</select><button type="button" disabled={userActionBusy || !row.user_id} onClick={()=>managePortalUser(row.user_id,row.is_active ? 'deactivate' : 'activate')}>{row.is_active ? 'Deactivate' : 'Activate'}</button><button type="button" disabled={userActionBusy || !row.user_id} onClick={()=>managePortalUser(row.user_id,'force_password_change')}>Force password change</button></td>}</tr>)}{!pageRows.length && <tr><td colSpan={headers.length}>{busy ? 'Loading…' : 'No records found in this table, or access is not granted by Supabase policies.'}</td></tr>}</tbody></table></div>}
       <div className="case-pagination"><span>Showing {filtered.length ? (page-1)*pageSize+1 : 0}–{Math.min(page*pageSize,filtered.length)} of {filtered.length}</span><div className="page-controls"><button disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Previous</button><span>Page {page} of {pages}</span><button disabled={page>=pages} onClick={()=>setPage(p=>Math.min(pages,p+1))}>Next</button></div></div>
     </>}
     {['Client Master','MMV Master','Location/Zone Master','Users','Permissions'].includes(active) && <p className="module-note">Records are read from Supabase. Add/edit/remove controls are not enabled until authenticated Admin identity and server-side authorization are wired; this avoids exposing master deletion or role changes to ordinary users.</p>}
@@ -3009,7 +3052,7 @@ function App({ role = 'Admin', userProfile = null }) {
           <TpaQcReport mode="Report Generated" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Report Generated')} onSave={(valueOverride) => tpaQcCase && queueMasterInspectionReportSave(tpaQcCase, valueOverride || tpaQcForm, 'Report Generated', true)} onSubmit={() => {}} onRemarks={item => openRemarkCase(item || tpaQcCase)} onReject={item => openRejectCase(item || tpaQcCase)} onHistory={item => openHistory(item || tpaQcCase)} onHold={() => {}} />
         ) : (
 
-          <OperationalModule active={active} cases={cases} locations={locations} tpas={tpas} clients={clients} onRefresh={loadCases} />
+          <OperationalModule active={active} cases={cases} locations={locations} tpas={tpas} clients={clients} onRefresh={loadCases} role={role} />
 
         )}
 
