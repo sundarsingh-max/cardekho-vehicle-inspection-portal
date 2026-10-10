@@ -4085,6 +4085,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       // Package every uploaded inspection photo into a downloadable ZIP. The ZIP is
       // stored beside the PDF so the link remains usable after the report is shared.
       let photoZipUrl = ''
+      const photoPublicUrls = {}
       const photoEntries = Object.entries(form.media || {}).filter(([, item]) => {
         if (typeof item === 'string') return Boolean(item)
         return Boolean(item?.dataUrl || item?.url || item?.publicUrl)
@@ -4112,8 +4113,36 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
             const blob = await response.blob()
             const originalName = typeof item === 'object' ? item.name : ''
             const ext = (originalName && /\.[a-z0-9]{2,5}$/i.test(originalName)) ? originalName.split('.').pop() : (blob.type?.split('/')[1] || 'jpg')
+
+            // Keep every image in the downloadable ZIP, as before.
             zip.file(`${String(packed + 1).padStart(2, '0')}_${safeFileName(label)}.${safeFileName(ext)}`, blob)
             packed += 1
+
+            // Also store an individual copy so the PDF's View annotation can use a real HTTPS URL.
+            try {
+              const safeLabel = safeFileName(label)
+              const imagePath = `${caseItem.case_id}/${Date.now()}_${packed}_${safeLabel}.${safeFileName(ext)}`
+              const imageUpload = await supabase.storage.from('inspection-reports').upload(imagePath, blob, {
+                contentType: blob.type || 'image/jpeg',
+                upsert: true
+              })
+              if (imageUpload.error) throw new Error(imageUpload.error.message)
+              const { data: imagePublic } = supabase.storage.from('inspection-reports').getPublicUrl(imagePath)
+              const publicUrl = imagePublic?.publicUrl || ''
+              if (publicUrl && /^https?:\/\//i.test(publicUrl)) {
+                photoPublicUrls[src] = publicUrl
+                if (typeof item === 'object') {
+                  if (item.dataUrl) photoPublicUrls[item.dataUrl] = publicUrl
+                  if (item.url) photoPublicUrls[item.url] = publicUrl
+                  if (item.publicUrl) photoPublicUrls[item.publicUrl] = publicUrl
+                }
+              } else {
+                throw new Error('Could not create a public photo URL.')
+              }
+            } catch (uploadError) {
+              // ZIP creation should still succeed even if an individual photo upload fails.
+              console.warn(`Could not create a public View URL for inspection photo: ${label}`, uploadError)
+            }
           } catch (e) {
             console.warn(`Could not add inspection photo to ZIP: ${label}`, e)
           }
@@ -4214,8 +4243,28 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         const img = card.querySelector('img')
         if (!title || !img) return
         if (!/^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VinPlate Photo|Chassis Imprint|Chassis Number Pencil Tracing)$/i.test(title)) return
-        const src = img.currentSrc || img.src || img.getAttribute('src') || ''
-        if (!src) return
+        
+// Remove original View anchors that may point to a data:image Base64 URL.
+        card.querySelectorAll('a').forEach(anchor => {
+          const href = anchor.getAttribute('href') || ''
+          const label = (anchor.textContent || '').trim()
+          if (/^data:image\//i.test(href) || /^view$/i.test(label)) anchor.remove()
+        })
+
+        const renderedSrc = img.currentSrc || img.src || img.getAttribute('src') || ''
+
+        const matchingMedia = Object.values(form.media || {}).find(item => {
+          if (!item || typeof item !== 'object') return false
+          return item.dataUrl === renderedSrc || item.url === renderedSrc || item.publicUrl === renderedSrc
+        })
+        const mediaSource = matchingMedia
+          ? (matchingMedia.dataUrl || matchingMedia.url || matchingMedia.publicUrl || renderedSrc)
+          : renderedSrc
+        const existingWebUrl = /^https?:\/\//i.test(mediaSource) ? mediaSource : ''
+        const src = photoPublicUrls[renderedSrc] || photoPublicUrls[mediaSource] || existingWebUrl
+
+        // Never embed a data:image Base64 string as a PDF URL annotation.
+        if (!src || !/^https?:\/\//i.test(src)) return
         card.style.setProperty('min-height', '150px', 'important')
         card.style.setProperty('padding', '6px', 'important')
         card.style.setProperty('box-sizing', 'border-box', 'important')
@@ -4278,15 +4327,20 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         linksWrap.appendChild(a)
         pdfLinkTargets.push({ element: a, url })
       }
-      makeTile('video', 'Download Exterior video', videoUrl)
-      makeTile('images', 'Download images', photoZipUrl)
-      if (exteriorSection?.parentNode && linksWrap.children.length) {
-        exteriorSection.replaceWith(linksWrap)
-      } else if (linksWrap.children.length) {
-        // Fallback: place shortcuts at the end of the report clone, without adding
-        // an extra page or restoring any of the original video-section content.
-        clone.appendChild(linksWrap)
-      }
+     
+makeTile('video', 'Download Exterior video', videoUrl)
+makeTile('images', 'Download images', photoZipUrl)
+
+if (exteriorSection?.parentNode) {
+  if (linksWrap.children.length > 0) {
+    exteriorSection.replaceWith(linksWrap)
+  } else {
+    exteriorSection.remove()
+  }
+} else if (linksWrap.children.length > 0) {
+  clone.appendChild(linksWrap)
+}
+
       printHost.appendChild(clone)
       document.body.appendChild(printHost)
 
