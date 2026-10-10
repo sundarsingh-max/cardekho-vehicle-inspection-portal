@@ -4118,6 +4118,44 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       printHost.appendChild(clone)
       document.body.appendChild(printHost)
 
+      // Copy live React-controlled field values into the cloned report.
+      // cloneNode() copies HTML attributes, but not the current value of inputs,
+      // selected options, or textarea content. Without this, the PDF shows labels
+      // while all user-entered values disappear.
+      clone.querySelectorAll('input, select, textarea').forEach(control => {
+        if (control.matches('[data-no-pdf="true"]') || control.type === 'file') {
+          control.remove()
+          return
+        }
+        const computed = window.getComputedStyle(control)
+        const printed = document.createElement('div')
+        printed.textContent = control.tagName === 'SELECT'
+          ? (control.selectedOptions?.[0]?.textContent || control.value || '—')
+          : control.tagName === 'TEXTAREA'
+            ? (control.value || ' ')
+            : (control.type === 'checkbox' || control.type === 'radio')
+              ? (control.checked ? 'Yes' : 'No')
+              : (control.value || '—')
+        printed.style.cssText = [
+          'box-sizing:border-box',
+          'display:flex',
+          'align-items:center',
+          'white-space:pre-wrap',
+          'overflow-wrap:anywhere',
+          'width:100%',
+          `min-height:${computed.height === 'auto' ? '22px' : computed.height}`,
+          `padding:${computed.padding}`,
+          `font:${computed.font}`,
+          `font-size:${computed.fontSize}`,
+          `line-height:${computed.lineHeight}`,
+          `color:${computed.color}`,
+          `background:${computed.backgroundColor === 'rgba(0, 0, 0, 0)' ? '#fff' : computed.backgroundColor}`,
+          `border:${computed.border}`,
+          `border-radius:${computed.borderRadius}`
+        ].join(';')
+        control.replaceWith(printed)
+      })
+
       // Wait for every photo to load/decode before capturing the report.
       const imgs = Array.from(clone.querySelectorAll('img'))
       await Promise.all(imgs.map(img => new Promise(resolve => {
@@ -4132,16 +4170,17 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         setTimeout(done, 15000)
       })))
 
+      // Capture at print-quality resolution. Previous sub-1x scales were
+      // effectively screen-resolution and produced visibly blurred PDFs.
       const attempts = [
-        { scale: 0.78, quality: 0.78 },
-        { scale: 0.64, quality: 0.70 },
-        { scale: 0.52, quality: 0.62 },
-        { scale: 0.42, quality: 0.55 }
+        { scale: 1.8, quality: 0.92 },
+        { scale: 1.5, quality: 0.90 },
+        { scale: 1.25, quality: 0.88 }
       ]
       let finalBlob = null
       let finalDoc = null
       for (const attempt of attempts) {
-        setPdfMessage(`Rendering complete report and photos (${Math.round(attempt.scale * 100)}% quality)...`)
+        setPdfMessage(`Rendering report and photos at print quality (${Math.round(attempt.scale * 100)}% scale)...`)
         const canvas = await window.html2canvas(clone, {
           scale: attempt.scale,
           useCORS: true,
@@ -4194,7 +4233,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         finalBlob = blob
         finalDoc = pdf
         if (canvas.toDataURL) canvas.width = 1 // release the large canvas buffer before the next attempt
-        if (finalBlob.size <= 4 * 1024 * 1024) break
+        if (finalBlob.size <= 12 * 1024 * 1024) break
       }
       if (!finalBlob || !finalDoc) throw new Error('Unable to generate PDF.')
       const path = `${caseItem.case_id}/${Date.now()}_inspection_report.pdf`
