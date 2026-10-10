@@ -4195,39 +4195,39 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         })
       }
 
-      // Add links only to the PDF clone inside the existing Exterior Video section.
-      // These links are intentionally not rendered in the live portal UI.
-      // Find the actual Exterior Video card by its heading, then walk upward to
-      // the smallest ancestor containing the video preview. This prevents the
-      // links from being appended to a large outer report container/footer.
-      const videoHeading = Array.from(clone.querySelectorAll('*')).find(el => el.children.length === 0 && /^Exterior Video \(Max 59s\)$/i.test((el.textContent || '').trim()))
-      let videoPanel = videoHeading?.parentElement || null
-      while (videoPanel && !videoPanel.querySelector('video') && videoPanel !== clone) videoPanel = videoPanel.parentElement
+      // PDF-only media shortcut area: remove the entire Exterior Video section
+      // (heading, video preview, filename, upload/replace controls and text links)
+      // and put only the two icon tiles in its place. The live portal is untouched.
+      const exteriorTitle = Array.from(clone.querySelectorAll('*')).find(el =>
+        el.children.length === 0 && (el.textContent || '').trim() === 'Exterior Video'
+      )
+      const exteriorSection = exteriorTitle?.parentElement?.parentElement || null
       const pdfLinkTargets = []
-      if (videoPanel) {
-        // PDF-only compact icon tiles, matching the user's reference images.
-        // The visible icon/label is rasterized into the PDF and a real PDF link
-        // annotation is overlaid afterward so the whole tile is clickable.
-        const linksWrap = document.createElement('div')
-        linksWrap.style.cssText = 'display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;margin-top:8px;padding:3px 0;font-family:Arial,sans-serif;'
-        const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl || form.exteriorVideo?.signedUrl || ''
-        const makeTile = (kind, label, url) => {
-          if (!url) return
-          const a = document.createElement('a')
-          a.href = url
-          a.setAttribute('aria-label', label)
-          a.style.cssText = 'width:78px;min-height:70px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:5px;color:#6b7280;text-decoration:none;font-size:8px;font-weight:400;text-align:center;cursor:pointer;padding:3px 2px;box-sizing:border-box;'
-          if (kind === 'video') {
-            a.innerHTML = '<svg width="38" height="38" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="3.5" y="3.5" width="24" height="29" rx="4" fill="#fff" stroke="#ff563f" stroke-width="1.8"/><path d="M13 11.5 L13 24 L22 17.8 Z" fill="#fff" stroke="#ff563f" stroke-width="1.5" stroke-linejoin="round"/><circle cx="29" cy="29" r="8" fill="#fff" stroke="#ff563f" stroke-width="1.8"/><path d="M29 24.5 V29 L32 31" fill="none" stroke="#ff563f" stroke-width="1.5" stroke-linecap="round"/></svg><span>Download Exterior video</span>'
-          } else {
-            a.innerHTML = '<svg width="38" height="38" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><path d="M3 10.5 H15 L18.5 14 H37 V33 H3 Z" fill="#f5b12b" stroke="#d18a12" stroke-width="1"/><path d="M3 14 H37 V33 H3 Z" fill="#ffc64b" stroke="#d18a12" stroke-width="1"/><path d="M3 18 H37 V33 H3 Z" fill="#f4a51c"/><path d="M3 10.5 H15 L18.5 14 H37 V18 H3 Z" fill="#ffd36c"/></svg><span>Download images</span>'
-          }
-          linksWrap.appendChild(a)
-          pdfLinkTargets.push({ element: a, url })
+      const linksWrap = document.createElement('div')
+      linksWrap.style.cssText = 'display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap;margin-top:10px;padding:8px 0;font-family:Arial,sans-serif;'
+      const videoUrl = form.exteriorVideo?.url || form.exteriorVideo?.publicUrl || form.exteriorVideo?.signedUrl || form.exteriorVideo?.previewUrl || ''
+      const makeTile = (kind, label, url) => {
+        if (!url) return
+        const a = document.createElement('a')
+        a.href = url
+        a.setAttribute('aria-label', label)
+        a.style.cssText = 'width:76px;height:62px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:4px;color:#6b7280;text-decoration:none;font-family:Arial,sans-serif;font-size:8px;font-weight:400;text-align:center;cursor:pointer;padding:0 2px;box-sizing:border-box;'
+        if (kind === 'video') {
+          a.innerHTML = '<svg width="38" height="38" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="3.5" y="3.5" width="24" height="29" rx="4" fill="#fff" stroke="#ff563f" stroke-width="1.8"/><path d="M13 11.5 L13 24 L22 17.8 Z" fill="#fff" stroke="#ff563f" stroke-width="1.5" stroke-linejoin="round"/><circle cx="29" cy="29" r="8" fill="#fff" stroke="#ff563f" stroke-width="1.8"/><path d="M29 24.5 V29 L32 31" fill="none" stroke="#ff563f" stroke-width="1.5" stroke-linecap="round"/></svg><span>Download Exterior video</span>'
+        } else {
+          a.innerHTML = '<svg width="38" height="38" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><path d="M3 10.5 H15 L18.5 14 H37 V33 H3 Z" fill="#f5b12b" stroke="#d18a12" stroke-width="1"/><path d="M3 14 H37 V33 H3 Z" fill="#ffc64b" stroke="#d18a12" stroke-width="1"/><path d="M3 18 H37 V33 H3 Z" fill="#f4a51c"/><path d="M3 10.5 H15 L18.5 14 H37 V18 H3 Z" fill="#ffd36c"/></svg><span>Download images</span>'
         }
-        makeTile('video', 'Download Exterior video', videoUrl)
-        makeTile('images', 'Download images', photoZipUrl)
-        if (linksWrap.children.length) videoPanel.appendChild(linksWrap)
+        linksWrap.appendChild(a)
+        pdfLinkTargets.push({ element: a, url })
+      }
+      makeTile('video', 'Download Exterior video', videoUrl)
+      makeTile('images', 'Download images', photoZipUrl)
+      if (exteriorSection?.parentNode && linksWrap.children.length) {
+        exteriorSection.replaceWith(linksWrap)
+      } else if (linksWrap.children.length) {
+        // Fallback: place shortcuts at the end of the report clone, without adding
+        // an extra page or restoring any of the original video-section content.
+        clone.appendChild(linksWrap)
       }
       printHost.appendChild(clone)
       document.body.appendChild(printHost)
