@@ -88,10 +88,11 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
           if (!cancelled) setRows(data || [])
         } else if (active === 'Users') {
           if (!cancelled) setRows([
-            { name: 'Bhanu Singh', role: 'Admin', status: 'Current user setup' },
-            { name: 'Anuj', role: 'Coordinator', status: 'Planned account' },
-            { name: 'Praveen', role: 'Pricing', status: 'Planned account' },
-            { name: 'Rohit', role: 'QC', status: 'Planned account' }
+            { name: 'Bhanu Singh', role: 'Admin', email: 'Existing Admin', status: 'Account setup required' },
+            { name: 'Sundar Singh', role: 'Admin', email: 'SUNDAR.SINGH@GIRNARSOFT.COM', status: 'Pending Supabase Auth account' },
+            { name: 'Anuj', role: 'Coordinator', email: 'Not provided', status: 'Pending Supabase Auth account' },
+            { name: 'Praveen', role: 'Pricing', email: 'Not provided', status: 'Pending Supabase Auth account' },
+            { name: 'Rohit', role: 'QC', email: 'Not provided', status: 'Pending Supabase Auth account' }
           ])
         } else if (active === 'Help Desk') {
           if (!cancelled) setRows([])
@@ -118,7 +119,7 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
   const countStatus = status => cases.filter(c => String(c.status || '').toUpperCase().replace(/[ -]/g, '_') === status).length
   const headers = active === 'Audit Trail' ? ['case_id','user_name','role','action','stage','old_status','new_status','remarks','created_at']
     : active === 'Location/Zone Master' ? ['zone','state','city','is_active','created_at']
-    : active === 'Users' ? ['name','role','status']
+    : active === 'Users' ? ['name','role','email','status']
     : ['case_id','customer_name','mobile_phone','registration_number','make','model','variant','status','assigned_tpa_name','created_at']
 
   return <section className="panel operational-module">
