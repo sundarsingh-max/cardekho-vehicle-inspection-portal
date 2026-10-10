@@ -67,6 +67,9 @@ function App() {
   const [tpaQcForm, setTpaQcForm] = useState({})
   const [reportHydrated, setReportHydrated] = useState(false)
   const [reportAutosaving, setReportAutosaving] = useState(false)
+  // Serialize every report write so a slower older request cannot finish after a newer save.
+  const reportSaveQueueRef = useRef(Promise.resolve())
+  const reportLoadRequestRef = useRef(0)
 
   const [cases, setCases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1240,19 +1243,36 @@ function App() {
     }
   }
 
+  function queueMasterInspectionReportSave(item, value, stage, writeAudit = true) {
+    // Snapshot at invocation time; never let concurrent Supabase writes race each other.
+    const snapshot = JSON.parse(JSON.stringify(value || {}))
+    const save = reportSaveQueueRef.current.catch(() => {}).then(() =>
+      persistMasterInspectionReport(item, snapshot, stage, writeAudit)
+    )
+    // Keep the queue alive after a failed save while still returning the error to its caller.
+    reportSaveQueueRef.current = save.catch(() => {})
+    return save
+  }
+
   async function openReportCase(item, stage) {
-    // Prevent the autosave effect from saving the previous case's/stale form
-    // while the selected case's saved report is still loading.
+    // Ignore late responses if the user switches to another case before loading finishes.
+    const requestId = ++reportLoadRequestRef.current
     setReportHydrated(false)
     setTpaQcCase(item)
     setActive(stage)
     setTpaQcMessage('')
     setActionError('')
     setTpaQcForm({})
-    const loaded = await loadMasterInspectionReport(item)
-    setTpaQcForm(loaded)
-    // Mark hydrated only after the loaded form has been placed into state.
-    setReportHydrated(true)
+    try {
+      const loaded = await loadMasterInspectionReport(item)
+      if (requestId !== reportLoadRequestRef.current) return
+      setTpaQcForm(loaded)
+      setReportHydrated(true)
+    } catch (error) {
+      if (requestId !== reportLoadRequestRef.current) return
+      setTpaQcMessage(`Unable to load saved report: ${error?.message || 'Unknown error'}. Autosave is paused until the report is re-opened.`)
+      setReportHydrated(false)
+    }
   }
 
   function openTpaQcCase(item) { openReportCase(item, 'TPA QC') }
@@ -1283,8 +1303,8 @@ function App() {
     const timer = setTimeout(async () => {
       try {
         setReportAutosaving(true)
-        await persistMasterInspectionReport(tpaQcCase, tpaQcForm, active, false)
-      } catch (error) { console.error('Master report autosave error:', error) }
+        await queueMasterInspectionReportSave(tpaQcCase, tpaQcForm, active, false)
+      } catch (error) { console.error('Master report autosave error:', error); setTpaQcMessage(`Autosave failed: ${error?.message || 'Unknown error'}. Please do not close this report until it saves.`) }
       finally { setReportAutosaving(false) }
     }, 800)
     return () => clearTimeout(timer)
@@ -1315,7 +1335,7 @@ function App() {
     if (!tpaQcCase) return
     setTpaQcSaving(true); setTpaQcMessage('')
     try {
-      await persistMasterInspectionReport(tpaQcCase, tpaQcForm, active, true)
+      await queueMasterInspectionReportSave(tpaQcCase, tpaQcForm, active, true)
       if (submitToQc) {
         const { error } = await supabase.from('cases').update({ status: 'QC' }).eq('id', tpaQcCase.id).eq('status', 'PRE_QC')
         if (error) throw new Error(error.message)
@@ -1332,7 +1352,7 @@ function App() {
     if (!item) return
     setActionSaving(true); setActionError('')
     try {
-      await persistMasterInspectionReport(item, tpaQcForm, 'QC', true)
+      await queueMasterInspectionReportSave(item, tpaQcForm, 'QC', true)
       const { error } = await supabase.from('cases').update({ status: 'PRICING' }).eq('id', item.id).eq('status', 'QC')
       if (error) throw new Error(error.message)
       await supabase.from('audit_trail').insert({ case_id: item.case_id, action: 'QC Approved', stage: 'QC', old_status: 'QC', new_status: 'PRICING', user_id: null, user_name: 'SS Sundar Singh', role: 'Admin' })
@@ -1347,7 +1367,7 @@ function App() {
     if (!reason || !reason.trim()) return
     setActionSaving(true); setActionError('')
     try {
-      await persistMasterInspectionReport(item, tpaQcForm, 'QC', true)
+      await queueMasterInspectionReportSave(item, tpaQcForm, 'QC', true)
       const { error } = await supabase.from('cases').update({ status: 'QC_HOLD' }).eq('id', item.id).eq('status', 'QC')
       if (error) throw new Error(error.message)
       await supabase.from('audit_trail').insert({ case_id: item.case_id, action: 'QC Hold', stage: 'QC', old_status: 'QC', new_status: 'QC_HOLD', reason: reason.trim(), remarks: reason.trim(), user_id: null, user_name: 'SS Sundar Singh', role: 'Admin' })
@@ -1360,7 +1380,7 @@ function App() {
     if (!item) return
     setActionSaving(true); setActionError('')
     try {
-      await persistMasterInspectionReport(item, tpaQcForm, 'QC Hold', true)
+      await queueMasterInspectionReportSave(item, tpaQcForm, 'QC Hold', true)
       const { error } = await supabase.from('cases').update({ status: 'QC' }).eq('id', item.id).eq('status', 'QC_HOLD')
       if (error) throw new Error(error.message)
       await supabase.from('audit_trail').insert({ case_id: item.case_id, action: 'QC Hold Resubmitted', stage: 'QC Hold', old_status: 'QC_HOLD', new_status: 'QC', user_id: null, user_name: 'SS Sundar Singh', role: 'Admin' })
@@ -1384,7 +1404,7 @@ function App() {
         pdf_generated_at: pdfMeta.pdfGeneratedAt || new Date().toISOString()
       }
       setTpaQcForm(finalForm)
-      await persistMasterInspectionReport(item, finalForm, 'Pricing', true)
+      await queueMasterInspectionReportSave(item, finalForm, 'Pricing', true)
       const { error } = await supabase.from('cases').update({ status: 'COMPLETED' }).eq('id', item.id).eq('status', 'PRICING')
       if (error) throw new Error(error.message)
       await supabase.from('audit_trail').insert({ case_id: item.case_id, action: 'Final Submitted / Report Generated', stage: 'Pricing', old_status: 'PRICING', new_status: 'COMPLETED', remarks: 'Pricing final submitted; PDF generated and uploaded successfully.', user_id: null, user_name: 'SS Sundar Singh', role: 'Admin' })
@@ -2842,13 +2862,13 @@ function App() {
         ) : active === 'TPA QC' ? (
           <TpaQcReport mode="TPA QC" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={tpaQcSaving || reportAutosaving} message={tpaQcMessage} onOpenCase={openTpaQcCase} onSave={() => saveTpaQcDraft(false)} onSubmit={() => saveTpaQcDraft(true)} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
         ) : active === 'QC' ? (
-          <TpaQcReport mode="QC" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={openQcCase} onSave={() => tpaQcCase && persistMasterInspectionReport(tpaQcCase, tpaQcForm, 'QC', true)} onSubmit={() => tpaQcCase && qcApproveCase(tpaQcCase)} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => tpaQcCase && qcHoldCase(tpaQcCase)} />
+          <TpaQcReport mode="QC" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={openQcCase} onSave={() => tpaQcCase && queueMasterInspectionReportSave(tpaQcCase, tpaQcForm, 'QC', true)} onSubmit={() => tpaQcCase && qcApproveCase(tpaQcCase)} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => tpaQcCase && qcHoldCase(tpaQcCase)} />
         ) : active === 'QC Hold' ? (
-          <TpaQcReport mode="QC Hold" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'QC Hold')} onSave={() => tpaQcCase && persistMasterInspectionReport(tpaQcCase, tpaQcForm, 'QC Hold', true)} onSubmit={() => tpaQcCase && moveQcHoldBackToQc(tpaQcCase)} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
+          <TpaQcReport mode="QC Hold" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'QC Hold')} onSave={() => tpaQcCase && queueMasterInspectionReportSave(tpaQcCase, tpaQcForm, 'QC Hold', true)} onSubmit={() => tpaQcCase && moveQcHoldBackToQc(tpaQcCase)} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
         ) : active === 'Pricing' ? (
-          <TpaQcReport mode="Pricing" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Pricing')} onSave={() => tpaQcCase && persistMasterInspectionReport(tpaQcCase, tpaQcForm, 'Pricing', true)} onSubmit={(meta) => tpaQcCase && pricingFinalSubmit(tpaQcCase, meta)} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
+          <TpaQcReport mode="Pricing" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Pricing')} onSave={() => tpaQcCase && queueMasterInspectionReportSave(tpaQcCase, tpaQcForm, 'Pricing', true)} onSubmit={(meta) => tpaQcCase && pricingFinalSubmit(tpaQcCase, meta)} onRemarks={() => tpaQcCase && openRemarkCase(tpaQcCase)} onReject={() => tpaQcCase && openRejectCase(tpaQcCase)} onHistory={() => tpaQcCase && openHistory(tpaQcCase)} onHold={() => {}} />
         ) : active === 'Report Generated' ? (
-          <TpaQcReport mode="Report Generated" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Report Generated')} onSave={(valueOverride) => tpaQcCase && persistMasterInspectionReport(tpaQcCase, valueOverride || tpaQcForm, 'Report Generated', true)} onSubmit={() => {}} onRemarks={item => openRemarkCase(item || tpaQcCase)} onReject={item => openRejectCase(item || tpaQcCase)} onHistory={item => openHistory(item || tpaQcCase)} onHold={() => {}} />
+          <TpaQcReport mode="Report Generated" caseItem={tpaQcCase} cases={cases} clients={clients} locations={locations} form={tpaQcForm} updateField={updateTpaQcField} setForm={setTpaQcForm} saving={actionSaving || reportAutosaving} message={actionError || tpaQcMessage} onOpenCase={item => openReportCase(item, 'Report Generated')} onSave={(valueOverride) => tpaQcCase && queueMasterInspectionReportSave(tpaQcCase, valueOverride || tpaQcForm, 'Report Generated', true)} onSubmit={() => {}} onRemarks={item => openRemarkCase(item || tpaQcCase)} onReject={item => openRejectCase(item || tpaQcCase)} onHistory={item => openHistory(item || tpaQcCase)} onHold={() => {}} />
         ) : (
 
           <section className="panel empty">
