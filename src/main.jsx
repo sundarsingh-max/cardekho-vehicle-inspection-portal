@@ -4452,22 +4452,21 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       })
       clone.querySelectorAll('[data-no-pdf="true"]').forEach(el => el.remove())
 
-      // PDF-only photo-card cleanup: keep the photo heading (e.g. 'Selfie with Vehicle')
-      // and the image, but remove the Replace/Upload row and uploaded filename. This only
-      // runs against the off-screen PDF clone; the live portal remains unchanged.
+      // PDF-only photo cleanup: remove upload controls, "Replace" actions and
+      // original filenames (e.g. IMG-20261006-WA0708.jpg) from the exported copy.
+      // Keep the live portal untouched and preserve the photo title + image.
+      const photoTitlePattern = /^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VinPlate Photo|Chassis Imprint|Chassis Number Pencil Tracing)$/i
       Array.from(clone.querySelectorAll('div')).forEach(card => {
-        if (!card.querySelector('img')) return
-        const directChildren = Array.from(card.children)
-        if (directChildren.length < 3) return
-        // A photo tile has a short title followed by the image frame, action row and filename.
-        const titleText = (directChildren[0]?.textContent || '').trim()
-        const imageFrame = directChildren.find(el => el.querySelector && el.querySelector('img'))
-        if (!titleText || !imageFrame || !/^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images|VinPlate Photo|Chassis Imprint|Chassis Number Pencil Tracing)$/i.test(titleText)) return
-        directChildren.slice(1).forEach(child => {
-          if (child === imageFrame) return
+        const img = card.querySelector(':scope > img') || card.querySelector('img')
+        if (!img) return
+        const children = Array.from(card.children)
+        const titleNode = children.find(el => !el.querySelector('img') && photoTitlePattern.test((el.textContent || '').trim()))
+        if (!titleNode) return
+        children.forEach(child => {
+          if (child === titleNode || child === img || child.contains(img)) return
           const text = (child.textContent || '').trim()
           const hasUploadControl = !!child.querySelector('input[type="file"]') || /\b(Replace|Upload|Remove)\b/i.test(text)
-          const looksLikeFilename = /\.(jpg|jpeg|png|webp|heic)(\s|$)/i.test(text) || /IMG[-_][A-Za-z0-9._ -]+\.(jpg|jpeg|png|webp|heic)/i.test(text)
+          const looksLikeFilename = /\bIMG[-_][A-Za-z0-9._ -]+\.(jpg|jpeg|png|webp|heic)\b/i.test(text) || /\.(jpg|jpeg|png|webp|heic)$/i.test(text)
           if (hasUploadControl || looksLikeFilename) child.remove()
         })
       })
@@ -4504,13 +4503,17 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
 
         // Never embed a data:image Base64 string as a PDF URL annotation.
         if (!src || !/^https?:\/\//i.test(src)) return
-        card.style.setProperty('min-height', '150px', 'important')
-        card.style.setProperty('padding', '6px', 'important')
+        card.style.setProperty('min-height', '190px', 'important')
+        card.style.setProperty('padding', '8px', 'important')
         card.style.setProperty('box-sizing', 'border-box', 'important')
-        img.style.setProperty('max-height', '108px', 'important')
-        img.style.setProperty('height', '108px', 'important')
+        card.style.setProperty('break-inside', 'avoid', 'important')
+        card.style.setProperty('page-break-inside', 'avoid', 'important')
+        img.style.setProperty('display', 'block', 'important')
+        img.style.setProperty('max-height', '145px', 'important')
+        img.style.setProperty('height', '145px', 'important')
         img.style.setProperty('width', '100%', 'important')
         img.style.setProperty('object-fit', 'contain', 'important')
+        img.style.setProperty('object-position', 'center center', 'important')
         const parent = card.parentElement
         if (parent) {
           const siblings = Array.from(parent.children).filter(el => el.querySelector && el.querySelector('img'))
