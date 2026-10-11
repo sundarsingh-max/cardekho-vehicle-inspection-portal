@@ -4452,6 +4452,34 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       })
       clone.querySelectorAll('[data-no-pdf="true"]').forEach(el => el.remove())
 
+      // Put the existing Front View photo prominently at the top of page one.
+      // Move (do not duplicate) its card so the report still contains one copy.
+      const frontViewCard = Array.from(clone.querySelectorAll('div')).find(card => {
+        const directTitle = Array.from(card.children).some(child => (child.textContent || '').trim() === 'Front View' && !child.querySelector('img'))
+        return directTitle && !!card.querySelector('img')
+      })
+      if (frontViewCard) {
+        frontViewCard.style.setProperty('width', '100%', 'important')
+        frontViewCard.style.setProperty('max-width', '360px', 'important')
+        frontViewCard.style.setProperty('margin', '10px auto 12px', 'important')
+        frontViewCard.style.setProperty('break-inside', 'avoid', 'important')
+        frontViewCard.style.setProperty('page-break-inside', 'avoid', 'important')
+        const frontImg = frontViewCard.querySelector('img')
+        if (frontImg) {
+          frontImg.style.setProperty('display', 'block', 'important')
+          frontImg.style.setProperty('width', '100%', 'important')
+          frontImg.style.setProperty('height', '180px', 'important')
+          frontImg.style.setProperty('max-height', '180px', 'important')
+          frontImg.style.setProperty('object-fit', 'contain', 'important')
+          frontImg.style.setProperty('object-position', 'center center', 'important')
+        }
+        const headerNode = clone.children[0]
+        const vehicleTitleNode = clone.children[1]
+        if (vehicleTitleNode) vehicleTitleNode.insertAdjacentElement('afterend', frontViewCard)
+        else if (headerNode) headerNode.insertAdjacentElement('afterend', frontViewCard)
+        else clone.prepend(frontViewCard)
+      }
+
       // PDF-only photo cleanup: remove upload controls, "Replace" actions and
       // original filenames (e.g. IMG-20261006-WA0708.jpg) from the exported copy.
       // Keep the live portal untouched and preserve the photo title + image.
