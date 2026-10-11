@@ -2924,6 +2924,7 @@ function App({ role = 'Admin', userProfile = null }) {
                               <td>{formatDate(item.created_at)}</td>
                               <td>
                                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                  <button type="button" className="primary" title="Move case to TPA QC" onClick={() => moveCaseToTpaQc(item)} disabled={actionSaving}>Move to TPA QC</button>
                                   <button type="button" className="icon-button" title="Reassign" aria-label="Reassign" onClick={() => openReassignCase(item)}>
                                     <RefreshCw size={15} />
                                   </button>
