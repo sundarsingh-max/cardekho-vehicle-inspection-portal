@@ -63,6 +63,96 @@ const items = [
 
 
 function OperationalModule({ active, cases = [], locations = [], tpas = [], clients = [], onRefresh, role = 'Admin' }) {
+  const [permissionMatrix, setPermissionMatrix] = useState({})
+  const [permissionBusy, setPermissionBusy] = useState(false)
+  const [permissionMessage, setPermissionMessage] = useState('')
+  const [permissionError, setPermissionError] = useState('')
+  const permissionRoles = ['Admin', 'Coordinator', 'TPA', 'QC', 'Pricing']
+  const permissionModules = ['Dashboard','Add Lead','Open Lead','Assign','Reassign','TPA QC','QC','QC Hold','Pricing','Report Generated','MIS','Case Search','Users','TPA Master','Client Master','MMV Master','Location/Zone Master','Permissions','Audit Trail','Help Desk']
+  useEffect(() => {
+    if (active !== 'Permissions' || role !== 'Admin') return
+    let cancelled = false
+    async function loadPermissions() {
+      setPermissionBusy(true); setPermissionError(''); setPermissionMessage('')
+      try {
+        const { data, error } = await supabase.from('role_permissions').select('role,module,can_access')
+        if (error) throw error
+        const matrix = {}
+        for (const r of permissionRoles) {
+          matrix[r] = {}
+          for (const m of permissionModules) matrix[r][m] = r === 'Admin' ? true : false
+        }
+        for (const row of data || []) if (matrix[row.role] && permissionModules.includes(row.module)) matrix[row.role][row.module] = Boolean(row.can_access)
+        if (!cancelled) setPermissionMatrix(matrix)
+      } catch (err) {
+        if (!cancelled) setPermissionError('Permission settings could not be loaded. Apply the role_permissions SQL migration in Supabase, then refresh. ' + (err?.message || ''))
+      } finally { if (!cancelled) setPermissionBusy(false) }
+    }
+    loadPermissions()
+    return () => { cancelled = true }
+  }, [active, role])
+  function changePermission(roleName, moduleName, allowed) {
+    if (roleName === 'Admin' && moduleName === 'Permissions') return
+    setPermissionMatrix(prev => ({ ...prev, [roleName]: { ...(prev[roleName] || {}), [moduleName]: allowed } }))
+    setPermissionMessage('')
+  }
+  async function savePermissions() {
+    if (role !== 'Admin') return
+    setPermissionBusy(true); setPermissionError(''); setPermissionMessage('')
+    try {
+      const rows = permissionRoles.flatMap(r => permissionModules.map(m => ({ role: r, module: m, can_access: r === 'Admin' ? true : Boolean(permissionMatrix[r]?.[m]), updated_at: new Date().toISOString() })))
+      const { error } = await supabase.from('role_permissions').upsert(rows, { onConflict: 'role,module' })
+      if (error) throw error
+      setPermissionMessage('Permissions saved successfully.')
+    } catch (err) {
+      setPermissionError('Could not save permissions. Apply the role_permissions SQL migration and verify Admin RLS policy. ' + (err?.message || ''))
+    } finally { setPermissionBusy(false) }
+  }
+  const [scopeUserId, setScopeUserId] = useState('')
+  const [scopeClientId, setScopeClientId] = useState('')
+  const [scopeZone, setScopeZone] = useState('')
+  const [scopeRows, setScopeRows] = useState([])
+  const [scopeLoading, setScopeLoading] = useState(false)
+  const [scopeError, setScopeError] = useState('')
+  const [scopeMessage, setScopeMessage] = useState('')
+  useEffect(() => {
+    if (active !== 'Permissions' || role !== 'Admin') return
+    let cancelled = false
+    ;(async () => {
+      setScopeLoading(true); setScopeError('')
+      try {
+        const { data, error } = await supabase.from('coordinator_case_scopes').select('id,user_id,client_id,zone,created_at').order('created_at', { ascending: false }).limit(5000)
+        if (error) throw error
+        if (!cancelled) setScopeRows(data || [])
+      } catch (e) {
+        if (!cancelled) setScopeError('Coordinator scope table is not ready. Apply the new SQL migration in Supabase. ' + (e?.message || ''))
+      } finally { if (!cancelled) setScopeLoading(false) }
+    })()
+    return () => { cancelled = true }
+  }, [active, role])
+  async function addCoordinatorScope(e) {
+    e.preventDefault()
+    if (role !== 'Admin' || !scopeUserId || !scopeClientId || !scopeZone) return
+    setScopeLoading(true); setScopeError(''); setScopeMessage('')
+    try {
+      const { error } = await supabase.from('coordinator_case_scopes').insert({ user_id: scopeUserId, client_id: String(scopeClientId), zone: scopeZone.trim() })
+      if (error) throw error
+      const { data, error: reloadError } = await supabase.from('coordinator_case_scopes').select('id,user_id,client_id,zone,created_at').order('created_at', { ascending: false }).limit(5000)
+      if (reloadError) throw reloadError
+      setScopeRows(data || []); setScopeMessage('Coordinator access granted for this Client + Zone.')
+    } catch (e) { setScopeError(e?.message || 'Unable to grant coordinator scope.') }
+    finally { setScopeLoading(false) }
+  }
+  async function removeCoordinatorScope(id) {
+    if (role !== 'Admin' || !window.confirm('Revoke this Coordinator Client + Zone access?')) return
+    setScopeLoading(true); setScopeError(''); setScopeMessage('')
+    try {
+      const { error } = await supabase.from('coordinator_case_scopes').delete().eq('id', id)
+      if (error) throw error
+      setScopeRows(rows => rows.filter(row => row.id !== id)); setScopeMessage('Coordinator access revoked.')
+    } catch (e) { setScopeError(e?.message || 'Unable to revoke access.') }
+    finally { setScopeLoading(false) }
+  }
   const [userForm, setUserForm] = useState({ full_name: '', email: '', role: 'Coordinator', temporary_password: '' })
   const [masterForm, setMasterForm] = useState({ name: '', client_code: '', segment: 'CAR', make: '', model: '', variant: '', year: '', zone: '', state: '', city: '', is_active: true })
   const [masterEditingId, setMasterEditingId] = useState(null)
@@ -243,13 +333,30 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
       {userActionError && <p className="module-error">⚠ {userActionError}</p>}
       <p className="module-note">ⓘ Requires the secure admin-create-user and admin-manage-user Supabase Edge Functions to be deployed. The browser never receives the service-role key.</p>
     </div>}
+    {active === 'Permissions' && role === 'Admin' && <div className="user-admin-panel" style={{padding:18,border:'1px solid #dbe5f2',borderRadius:14,background:'#fff',marginBottom:18}}>
+      <h3 style={{marginTop:0,color:'#17345d'}}>Coordinator Client & Zone Access</h3>
+      <p className="module-note">Grant each Coordinator access to specific Client + Zone combinations. Cases outside these combinations are filtered by the Supabase security policy after the SQL migration is applied.</p>
+      <form onSubmit={addCoordinatorScope} style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12,alignItems:'end'}}>
+        <label><span style={{display:'block',marginBottom:6}}>Coordinator</span><select required value={scopeUserId} onChange={e=>setScopeUserId(e.target.value)}><option value="">Select Coordinator</option>{rows.filter(u=>u.role==='Coordinator' && u.is_active!==false && u.user_id).map(u=><option key={u.user_id} value={u.user_id}>{u.full_name || u.email} — {u.email}</option>)}</select></label>
+        <label><span style={{display:'block',marginBottom:6}}>Client</span><select required value={scopeClientId} onChange={e=>setScopeClientId(e.target.value)}><option value="">Select Client</option>{clients.filter(c=>c.is_active!==false).map(c=><option key={c.id} value={c.id}>{clientDisplayName(c)}</option>)}</select></label>
+        <label><span style={{display:'block',marginBottom:6}}>Zone</span><select required value={scopeZone} onChange={e=>setScopeZone(e.target.value)}><option value="">Select Zone</option>{uniqueValues(locations.filter(l=>l.is_active!==false).map(l=>l.zone)).map(z=><option key={z} value={z}>{z}</option>)}</select></label>
+        <button type="submit" disabled={scopeLoading || !scopeUserId || !scopeClientId || !scopeZone}>Grant Access</button>
+      </form>
+      {scopeError && <p className="module-error">{scopeError}</p>}{scopeMessage && <p className="module-success">{scopeMessage}</p>}
+      <div className="table-wrap" style={{marginTop:12}}><table className="data-table"><thead><tr><th>COORDINATOR</th><th>CLIENT</th><th>ZONE</th><th>ACTION</th></tr></thead><tbody>{scopeRows.map(s=>{const u=rows.find(x=>x.user_id===s.user_id); const c=clients.find(x=>String(x.id)===String(s.client_id)); return <tr key={s.id}><td>{u?.full_name || u?.email || s.user_id}</td><td>{c ? clientDisplayName(c) : s.client_id}</td><td>{s.zone}</td><td><button type="button" className="secondary" disabled={scopeLoading} onClick={()=>removeCoordinatorScope(s.id)}>Revoke</button></td></tr>})}{!scopeRows.length && <tr><td colSpan={4}>{scopeLoading?'Loading access rules…':'No Coordinator access rules configured.'}</td></tr>}</tbody></table></div>
+    </div>}
+    {active === 'Permissions' && role === 'Admin' && <div className="user-admin-panel" style={{padding:18,border:'1px solid #dbe5f2',borderRadius:14,background:'#f8fbff',marginBottom:18}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap'}}><div><h3 style={{marginTop:0,color:'#17345d',marginBottom:5}}>Role & Permission Settings</h3><p className="module-note" style={{marginTop:0}}>Select the modules each role can access. Admin access is always retained.</p></div><button type="button" disabled={permissionBusy} onClick={savePermissions} style={{minWidth:150}}>{permissionBusy ? 'Saving…' : '🔐 Save Permissions'}</button></div>
+      {permissionError && <p className="module-error">{permissionError}</p>}{permissionMessage && <p className="module-success">✓ {permissionMessage}</p>}
+      {permissionBusy && !Object.keys(permissionMatrix).length ? <p>Loading role permissions…</p> : <div style={{overflowX:'auto',marginTop:12}}><table className="data-table"><thead><tr><th>MODULE / SCREEN</th>{permissionRoles.map(r=><th key={r} style={{textAlign:'center'}}>{r}</th>)}</tr></thead><tbody>{permissionModules.map(m=><tr key={m}><td style={{fontWeight:600,minWidth:180}}>{m}</td>{permissionRoles.map(r=><td key={r} style={{textAlign:'center'}}><label title={r==='Admin'?'Admin access is mandatory':(permissionMatrix[r]?.[m]?'Allowed':'Denied')} style={{display:'inline-flex',alignItems:'center',justifyContent:'center',gap:5,cursor:r==='Admin'?'not-allowed':'pointer'}}><input type="checkbox" aria-label={r+' access to '+m} checked={r==='Admin'?true:Boolean(permissionMatrix[r]?.[m])} disabled={r==='Admin'||permissionBusy} onChange={e=>changePermission(r,m,e.target.checked)} style={{width:17,height:17,accentColor:'#1769e0'}}/><span style={{fontSize:11,color:permissionMatrix[r]?.[m]?'#166534':'#64748b'}}>{r==='Admin'?'Always on':permissionMatrix[r]?.[m]?'Allow':'Deny'}</span></label></td>)}</tr>)}</tbody></table></div>}
+    </div>}
     {(['Case Search','Audit Trail','Client Master','MMV Master','Location/Zone Master','Users','Permissions'].includes(active)) && <>
       <input className="module-search" value={query} onChange={e=>{setQuery(e.target.value);setPage(1)}} placeholder={active === 'Case Search' ? 'Search case ID, registration, customer, mobile…' : 'Filter records…'} />
       {busy ? <p>Loading records…</p> : error ? <p className="module-error">{error}</p> : <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h.replace(/_/g,' ').toUpperCase()}</th>)}{(active === 'Users' || masterTableByModule[active] && role === 'Admin') && <th>ACTIONS</th>}</tr></thead><tbody>{pageRows.map((row,i)=><tr key={row.id || row.user_id || row.case_id || i}>{headers.map(h=><td key={h}>{row[h] == null || row[h] === '' ? '—' : typeof row[h] === 'boolean' ? (row[h] ? 'Active' : 'Inactive') : String(row[h])}</td>)}{masterTableByModule[active] && role === 'Admin' && <td style={{minWidth:150}}><div style={{display:'flex',gap:6}}><button type="button" title="Edit record" aria-label="Edit record" onClick={()=>beginMasterEdit(row)} style={{borderRadius:8,padding:'7px 10px'}}><Pencil size={15}/> Edit</button><button type="button" title="Remove record" aria-label="Remove record" disabled={masterSaving} onClick={()=>deleteMasterRecord(row)} style={{borderRadius:8,padding:'7px 10px',background:'#fff1f2',color:'#be123c'}}><X size={15}/> Remove</button></div></td>}{active === 'Users' && role === 'Admin' && <td className="user-row-actions" style={{minWidth:300,width:300,whiteSpace:'normal',overflow:'visible'}}>
         <div style={{display:'flex',flexWrap:'nowrap',alignItems:'center',gap:8,minWidth:285}}>
           <label title="Change user role" style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:11,color:'#334155',flexShrink:0}}><icon-placeholder /> <select aria-label="Change user role" value={row.role || 'Coordinator'} disabled={userActionBusy} onChange={e=>managePortalUser(row.user_id,'set_role',{role:e.target.value})} style={{minWidth:112,maxWidth:125,padding:'7px 8px',borderRadius:7,border:'1px solid #cbd5e1',background:'#fff'}}>{['Admin','Coordinator','TPA','QC','Pricing'].map(r=><option key={r}>{r}</option>)}</select></label>
-          <button title={row.is_active ? 'Deactivate account' : 'Activate account'} aria-label={row.is_active ? 'Deactivate account' : 'Activate account'} type="button" disabled={userActionBusy || !row.user_id} onClick={()=>managePortalUser(row.user_id,row.is_active ? 'deactivate' : 'activate')} style={{display:'inline-flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:3,minWidth:62,minHeight:54,flexShrink:0,borderRadius:9,padding:'6px 7px',background:row.is_active?'#fff1f2':'#ecfdf5',color:row.is_active?'#be123c':'#047857',border:'1px solid '+(row.is_active?'#fecdd3':'#a7f3d0'),fontWeight:700,fontSize:10,whiteSpace:'nowrap',lineHeight:1.2}}><span aria-hidden="true" style={{fontSize:18,lineHeight:1}}>{row.is_active ? '⏻' : '✓'}</span><span>{row.is_active ? 'Deactivate' : 'Activate'}</span></button>
-          <button title="Require password change at next login" aria-label="Force password change" type="button" disabled={userActionBusy || !row.user_id} onClick={()=>managePortalUser(row.user_id,'force_password_change')} style={{display:'inline-flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:3,minWidth:82,minHeight:54,flexShrink:0,borderRadius:9,padding:'6px 8px',background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',fontWeight:700,fontSize:10,whiteSpace:'nowrap',lineHeight:1.2}}><span aria-hidden="true" style={{fontSize:18,lineHeight:1}}>🔑</span><span>Reset Password</span></button>
+          <button title={row.is_active ? 'Deactivate account' : 'Activate account'} aria-label={row.is_active ? 'Deactivate account' : 'Activate account'} type="button" disabled={userActionBusy || !row.user_id} onClick={()=>managePortalUser(row.user_id,row.is_active ? 'deactivate' : 'activate')} style={{display:'inline-flex',alignItems:'center',justifyContent:'center',width:38,height:38,flexShrink:0,borderRadius:9,padding:6,background:row.is_active?'#fff1f2':'#ecfdf5',color:row.is_active?'#be123c':'#047857',border:'1px solid '+(row.is_active?'#fecdd3':'#a7f3d0'),fontWeight:700,fontSize:18,lineHeight:1}}>{row.is_active ? '⏻' : '✓'}</button>
+          <button title="Require password change at next login" aria-label="Force password change" type="button" disabled={userActionBusy || !row.user_id} onClick={()=>managePortalUser(row.user_id,'force_password_change')} style={{display:'inline-flex',alignItems:'center',justifyContent:'center',width:38,height:38,flexShrink:0,borderRadius:9,padding:6,background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',fontSize:18,lineHeight:1}}>🔑</button>
         </div>
       </td>}</tr>)}{!pageRows.length && <tr><td colSpan={headers.length}>{busy ? 'Loading…' : 'No records found in this table, or access is not granted by Supabase policies.'}</td></tr>}</tbody></table></div>}
       <div className="case-pagination"><span>Showing {filtered.length ? (page-1)*pageSize+1 : 0}–{Math.min(page*pageSize,filtered.length)} of {filtered.length}</span><div className="page-controls"><button disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Previous</button><span>Page {page} of {pages}</span><button disabled={page>=pages} onClick={()=>setPage(p=>Math.min(pages,p+1))}>Next</button></div></div>
@@ -441,7 +548,7 @@ function App({ role = 'Admin', userProfile = null }) {
       return
     }
 
-    if (!/^\\d{10}$/.test(mobile)) {
+    if (!/^\d{10}$/.test(mobile)) {
       setTpaError('Enter a valid 10 digit mobile number.')
       return
     }
@@ -2924,7 +3031,7 @@ function App({ role = 'Admin', userProfile = null }) {
                               <td>{formatDate(item.created_at)}</td>
                               <td>
                                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                  <button type="button" className="primary" title="Move case to TPA QC" onClick={() => moveCaseToTpaQc(item)} disabled={actionSaving}>Move to TPA QC</button>
+                                  <button type="button" className="icon-button" title="Move to TPA QC" aria-label="Move to TPA QC" onClick={() => moveCaseToTpaQc(item)} disabled={actionSaving} style={{display:'inline-flex',alignItems:'center',justifyContent:'center',width:36,height:34,padding:0}}><ShieldCheck size={19} strokeWidth={2.3} aria-hidden="true" /></button>
                                   <button type="button" className="icon-button" title="Reassign" aria-label="Reassign" onClick={() => openReassignCase(item)}>
                                     <RefreshCw size={15} />
                                   </button>
@@ -3066,7 +3173,7 @@ function App({ role = 'Admin', userProfile = null }) {
                                     onClick={() => moveCaseToTpaQc(item)}
                                     disabled={actionSaving}
                                   >
-                                    <CheckCircle2 size={15} />
+                                    <ShieldCheck size={15} aria-hidden="true" />
                                   </button>
                                   <button
                                     type="button"
@@ -3615,6 +3722,26 @@ function App({ role = 'Admin', userProfile = null }) {
 
             </form>
 
+          </Modal>
+        )}
+
+        {tpaModal && (
+          <Modal title="Add TPA" close={() => { if (!tpaSaving) { setTpaModal(false); setTpaError('') } }}>
+            <form onSubmit={event => { event.preventDefault(); saveTpa() }} className="user-admin-form" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:14,alignItems:'end'}}>
+              <label className="field"><span>TPA Name *</span><input required value={tpaForm.name} onChange={e=>setTpaForm(p=>({...p,name:e.target.value}))} placeholder="Enter TPA name" /></label>
+              <label className="field"><span>Mobile Number *</span><input required inputMode="numeric" type="tel" maxLength={10} pattern="[0-9]{10}" value={tpaForm.mobile} onChange={e=>setTpaForm(p=>({...p,mobile:e.target.value.replace(/\D/g,'').slice(0,10)}))} placeholder="10 digit mobile number" /></label>
+              <label className="field"><span>Email</span><input type="email" value={tpaForm.email} onChange={e=>setTpaForm(p=>({...p,email:e.target.value}))} placeholder="name@company.com" /></label>
+              <label className="field"><span>Location</span><input value={tpaForm.location} onChange={e=>setTpaForm(p=>({...p,location:e.target.value}))} placeholder="Location" /></label>
+              <label className="field"><span>Zone</span><input value={tpaForm.zone} onChange={e=>setTpaForm(p=>({...p,zone:e.target.value}))} placeholder="Zone" /></label>
+              <label className="field"><span>State</span><input value={tpaForm.state} onChange={e=>setTpaForm(p=>({...p,state:e.target.value}))} placeholder="State" /></label>
+              <label className="field"><span>Client Mapping</span><input value={tpaForm.client_mapping} onChange={e=>setTpaForm(p=>({...p,client_mapping:e.target.value}))} placeholder="Client name(s), or leave blank for all" /></label>
+              <label style={{display:'flex',alignItems:'center',gap:8}}><input type="checkbox" checked={Boolean(tpaForm.is_active)} onChange={e=>setTpaForm(p=>({...p,is_active:e.target.checked}))} /> Active TPA</label>
+              {tpaError && <p role="alert" className="module-error" style={{gridColumn:'1 / -1',margin:0}}>{tpaError}</p>}
+              <div style={{display:'flex',justifyContent:'flex-end',gap:10,gridColumn:'1 / -1'}}>
+                <button type="button" className="secondary" disabled={tpaSaving} onClick={()=>{setTpaModal(false);setTpaError('')}}>Cancel</button>
+                <button type="submit" className="primary" disabled={tpaSaving}>{tpaSaving ? 'Saving…' : 'Save TPA'}</button>
+              </div>
+            </form>
           </Modal>
         )}
 
@@ -4399,8 +4526,11 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         }
       }
 
-      // Render a fixed-width clone so wide two-column tables and photos are not clipped by the screen viewport.
-      // The sample PDF remains the target layout; this preserves the portal report's sections while fixing field values and image clarity.
+      // Build a fixed-width, PDF-only copy. Keep the live portal unchanged.
+      // Reference structure: summary/details first, then dedicated two-column photo pages,
+      // followed by disclaimer, Vahan details, and challan details. The photo grid and cards
+      // below are deliberately constrained to prevent the portal's four-column screen layout
+      // from leaking into the exported report.
       const source = reportRef.current
       printHost = document.createElement('div')
       printHost.style.cssText = 'position:fixed;left:-20000px;top:0;width:794px;background:#fff;z-index:-1;overflow:visible;'
@@ -4452,12 +4582,25 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       })
       clone.querySelectorAll('[data-no-pdf="true"]').forEach(el => el.remove())
 
+      // The reference report does not contain the internal Pricing workflow panel.
+      // Remove that panel from the exported PDF only; pricing data and portal UI remain intact.
+      Array.from(clone.querySelectorAll('div')).forEach(el => {
+        if (el.children.length !== 2) return
+        const heading = el.firstElementChild
+        const body = el.lastElementChild
+        if (!heading || !body) return
+        const text = (heading.textContent || '').replace(/\s+/g, ' ').trim()
+        if (/^E?\s*Pricing$/i.test(text) && /Valuation Price/.test(body.textContent || '')) {
+          el.remove()
+        }
+      })
+
       // Keep photos in the reference report's dedicated photo pages; moving Front View
       // into page one changes the sample's page structure and can force later photos to split.
       // PDF-only photo cleanup: remove upload controls, "Replace" actions and
       // original filenames (e.g. IMG-20261006-WA0708.jpg) from the exported copy.
       // Keep the live portal untouched and preserve the photo title + image.
-      const photoTitlePattern = /^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VinPlate Photo|Chassis Imprint|Chassis Number Pencil Tracing)$/i
+      const photoTitlePattern = /^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Front Underbody|Rear Underbody|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VIN Plate Photo|VinPlate Photo|Chassis Imprint|Pencil Tracing|Chassis Number Pencil Tracing)$/i
       Array.from(clone.querySelectorAll('div')).forEach(card => {
         const img = card.querySelector(':scope > img') || card.querySelector('img')
         if (!img) return
@@ -4482,7 +4625,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         const title = (children[0]?.textContent || '').trim()
         const img = card.querySelector('img')
         if (!title || !img) return
-        if (!/^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VinPlate Photo|Chassis Imprint|Chassis Number Pencil Tracing)$/i.test(title)) return
+        if (!/^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Front Underbody|Rear Underbody|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VIN Plate Photo|VinPlate Photo|Chassis Imprint|Pencil Tracing|Chassis Number Pencil Tracing)$/i.test(title)) return
         
 // Remove original View anchors that may point to a data:image Base64 URL.
         card.querySelectorAll('a').forEach(anchor => {
@@ -4505,27 +4648,42 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
 
         // Never embed a data:image Base64 string as a PDF URL annotation.
         if (!src || !/^https?:\/\//i.test(src)) return
-        card.style.setProperty('min-height', '190px', 'important')
-        card.style.setProperty('height', 'auto', 'important')
+        card.style.setProperty('min-height', '174px', 'important')
+        card.style.setProperty('height', '174px', 'important')
+        card.style.setProperty('display', 'flex', 'important')
+        card.style.setProperty('flex-direction', 'column', 'important')
+        card.style.setProperty('justify-content', 'flex-start', 'important')
         card.style.setProperty('overflow', 'visible', 'important')
         card.style.setProperty('padding', '8px', 'important')
         card.style.setProperty('box-sizing', 'border-box', 'important')
         card.style.setProperty('break-inside', 'avoid', 'important')
         card.style.setProperty('page-break-inside', 'avoid', 'important')
         img.style.setProperty('display', 'block', 'important')
-        img.style.setProperty('max-height', 'none', 'important')
-        img.style.setProperty('height', 'auto', 'important')
+        img.style.setProperty('max-height', '118px', 'important')
+        img.style.setProperty('height', '118px', 'important')
         img.style.setProperty('min-height', '0', 'important')
         img.style.setProperty('width', '100%', 'important')
+        img.style.setProperty('flex', '0 0 118px', 'important')
         img.style.setProperty('object-fit', 'contain', 'important')
         img.style.setProperty('object-position', 'center center', 'important')
-        const parent = card.parentElement
-        if (parent) {
-          const siblings = Array.from(parent.children).filter(el => el.querySelector && el.querySelector('img'))
-          if (siblings.length >= 2) {
-            parent.style.setProperty('grid-template-columns', 'repeat(3, minmax(0, 1fr))', 'important')
-            parent.style.setProperty('gap', '8px', 'important')
+        // Walk upward to the actual photo-grid wrapper. The first parent is often
+        // just a one-card row, so styling it leaves the original 3/4-column grid intact.
+        let grid = card.parentElement
+        let photoGrid = null
+        while (grid && grid !== clone) {
+          const imageChildren = Array.from(grid.children).filter(el => el.querySelector && el.querySelector('img'))
+          if (imageChildren.length >= 2) {
+            photoGrid = grid
+            break
           }
+          grid = grid.parentElement
+        }
+        if (photoGrid) {
+          photoGrid.style.setProperty('display', 'grid', 'important')
+          photoGrid.style.setProperty('grid-template-columns', 'repeat(2, minmax(0, 1fr))', 'important')
+          photoGrid.style.setProperty('column-gap', '10px', 'important')
+          photoGrid.style.setProperty('row-gap', '10px', 'important')
+          photoGrid.style.setProperty('align-items', 'start', 'important')
         }
         const view = document.createElement('a')
         view.href = src
@@ -4588,6 +4746,276 @@ if (exteriorSection?.parentNode) {
   clone.appendChild(linksWrap)
 }
 
+
+      // Build the export as the same nine fixed A4 pages as the supplied sample.
+      // This is PDF-only DOM: the actual portal/report editor is not modified.
+      const directChildren = Array.from(clone.children)
+      const sectionNode = title => directChildren.find(node => {
+        const heading = node.firstElementChild
+        return heading && (heading.textContent || '').replace(/\\s+/g, ' ').trim().includes(title)
+      })
+      const vehicleSection = sectionNode('Vehicle Details')
+      const scoreSection = sectionNode('Summary / Score')
+      const remarksSection = sectionNode('Remarks')
+      const detailSection = sectionNode('Detailed Inspection')
+      const photoSection = sectionNode('Inspection Photos / Media')
+      const vahanSection = sectionNode('Vahan Details')
+      const challanSection = sectionNode('Challan Details')
+      const disclaimerSection = sectionNode('Disclaimer / Notes')
+      const reportTitle = directChildren.find(node => node !== vehicleSection && node.textContent && /Vehicle Inspection Report/.test(node.textContent) && node.querySelector && !node.firstElementChild?.textContent?.includes('Vehicle Details'))
+      const vehicleNameNode = directChildren.find(node => node !== reportTitle && node.textContent && /Vehicle Inspection Report/.test(node.textContent) === false && node.children.length === 0 && node.textContent.trim())
+      const certificate = String(caseItem.case_id || '').replace(/^CASE-/, '')
+      const inspectionDate = new Date().toLocaleDateString('en-GB')
+      const pageHeader = () => {
+        const header = document.createElement('div')
+        header.style.cssText = 'height:42px;box-sizing:border-box;text-align:right;font: bold 13px Arial,sans-serif;color:#222;padding:0 0 5px;border-bottom:1px solid #aaa;margin-bottom:8px;'
+        header.innerHTML = '<div>Vehicle Inspection Report</div><div style="font-size:9px;font-weight:400;margin-top:3px">Certificate No.: ' + certificate.replace(/[&<>"]/g, '') + '</div>'
+        return header
+      }
+      const pdfPages = []
+      const makePdfPage = (number, title = '') => {
+        const page = document.createElement('div')
+        page.className = 'cd-pdf-page'
+        page.dataset.pdfPage = String(number)
+        page.style.cssText = 'width:794px;height:1123px;min-height:1123px;max-height:1123px;box-sizing:border-box;overflow:hidden;background:#fff;padding:24px 30px 22px;font-family:Arial,Helvetica,sans-serif;color:#171717;position:relative;display:flex;flex-direction:column;'
+        page.appendChild(pageHeader())
+        if (title) {
+          const heading = document.createElement('div')
+          heading.textContent = title
+          heading.style.cssText = 'font:bold 15px Arial,sans-serif;text-align:center;margin:2px 0 12px;'
+          page.appendChild(heading)
+        }
+        const footer = document.createElement('div')
+        footer.className = 'cd-pdf-footer'
+        footer.style.cssText = 'position:absolute;left:30px;right:30px;bottom:12px;height:18px;border-top:1px solid #ddd;padding-top:4px;display:flex;justify-content:space-between;font:9px Arial,sans-serif;color:#555;background:#fff;'
+        footer.innerHTML = '<span>Date of Inspection ' + inspectionDate + '</span><span>Page: ' + number + ' of 9</span>'
+        page.appendChild(footer)
+        pdfPages.push(page)
+        return page
+      }
+      const appendSection = (page, node, compact = false) => {
+        if (!node) return
+        const copy = node
+        copy.style.setProperty('margin-top', '5px', 'important')
+        copy.style.setProperty('flex-shrink', '0', 'important')
+        const headingText = (copy.firstElementChild?.textContent || '').replace(/\s+/g, ' ').trim()
+        if (compact) {
+          copy.style.setProperty('font-size', '9px', 'important')
+          copy.querySelectorAll('*').forEach(el => {
+            if (el.style) el.style.setProperty('font-size', '9px', 'important')
+          })
+        }
+        // Match the sample's compact four-column Vehicle Details layout.
+        if (headingText.includes('Vehicle Details') && copy.children[1]) {
+          copy.children[1].style.setProperty('padding', '5px', 'important')
+          copy.children[1].style.setProperty('display', 'grid', 'important')
+          copy.children[1].style.setProperty('grid-template-columns', 'repeat(4,minmax(0,1fr))', 'important')
+          copy.children[1].style.setProperty('column-gap', '10px', 'important')
+          copy.children[1].style.setProperty('row-gap', '1px', 'important')
+          copy.children[1].querySelectorAll(':scope > div').forEach(cell => {
+            cell.style.setProperty('min-width', '0', 'important')
+            cell.style.setProperty('overflow-wrap', 'anywhere', 'important')
+          })
+        }
+        if (headingText.includes('Summary / Score') && copy.children[1]) {
+          copy.children[1].style.setProperty('grid-template-columns', 'repeat(2,minmax(0,1fr))', 'important')
+          copy.children[1].style.setProperty('column-gap', '14px', 'important')
+        }
+        page.appendChild(copy)
+      }
+      const page1 = makePdfPage(1)
+      const vehicleTitleRow = document.createElement('div')
+      vehicleTitleRow.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin:4px 0 8px;'
+      if (vehicleNameNode) {
+        const name = vehicleNameNode.cloneNode(true)
+        name.style.cssText = 'font:bold 17px Arial,sans-serif;margin:0;flex:1;'
+        vehicleTitleRow.appendChild(name)
+      }
+      if (form.valuation_price) {
+        const priceBlock = document.createElement('div')
+        priceBlock.style.cssText = 'text-align:right;min-width:120px;font: bold 16px Arial,sans-serif;color:#111;'
+        const priceLabel = document.createElement('div')
+        priceLabel.textContent = String(form.valuation_price).trim()
+        const priceCaption = document.createElement('div')
+        priceCaption.textContent = 'Estimated Valuation'
+        priceCaption.style.cssText = 'font:9px Arial,sans-serif;color:#666;margin-top:3px;'
+        priceBlock.append(priceLabel, priceCaption)
+        vehicleTitleRow.appendChild(priceBlock)
+      }
+      page1.appendChild(vehicleTitleRow)
+      appendSection(page1, vehicleSection, true)
+      appendSection(page1, scoreSection, true)
+      const page2 = makePdfPage(2)
+      // Put the media download shortcuts before the checklist, as in the reference.
+      const downloadArea = directChildren.find(node => node.tagName === 'DIV' && node.querySelector && node.querySelector('a[aria-label="Download Exterior video"],a[aria-label="Download images"]'))
+      if (downloadArea) page2.appendChild(downloadArea)
+      appendSection(page2, remarksSection, true)
+      appendSection(page2, detailSection, true)
+
+      // Fill absent source categories with explicit empty slots rather than
+      // letting the photo grid collapse or move later report sections upward.
+      const sourcePhotoGrid = photoSection?.children?.[1]?.firstElementChild
+      const sourceCards = sourcePhotoGrid ? Array.from(sourcePhotoGrid.children) : []
+      const photoLabels = [
+        'Profile Picture','Right View','Right Quarter Panel','Rear View','Left Quarter Panel','Left View','Left Side Profile Pic','Front View',
+        'Front Underbody','Rear Underbody','Engine Compartment','Engine Compartment','Boot / Dicky','Front Windscreen','Windscreen - Interior (from rear seat)','Odometer Reading',
+        'ABC Pedals (from driver seat)','ABC Pedals (from driver seat)','Front Right Tyre','Rear Left Tyre','Rear Left Tyre','Front Left Tyre','Selfie with Vehicle','Other Images',
+        'Other Images','VinPlate Photo','Chassis Imprint','Chassis Number Pencil Tracing'
+      ]
+      const normalizedLabel = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+      const usedCards = new Set()
+      const preparedCards = photoLabels.map((label, index) => {
+        const wanted = normalizedLabel(label)
+        let card = sourceCards.find(candidate => {
+          if (usedCards.has(candidate)) return false
+          const title = candidate.firstElementChild?.textContent || ''
+          const actual = normalizedLabel(title)
+          return actual === wanted ||
+            (wanted === 'vinplatephoto' && actual.includes('vinplate')) ||
+            (wanted === 'chassisnumberpenciltracing' && actual.includes('penciltracing')) ||
+            (wanted === 'enginecompartment' && actual.includes('enginecompartment')) ||
+            (wanted === 'otherimages' && actual.includes('otherimages')) ||
+            (wanted === 'abcpedalsfromdriverseat' && actual.includes('abcpedals'))
+        })
+        if (card) usedCards.add(card)
+        else {
+          card = document.createElement('div')
+          card.style.cssText = 'border:1px solid #d0d0d0;box-sizing:border-box;padding:8px;height:190px;display:flex;flex-direction:column;background:#fff;'
+          const labelNode = document.createElement('div')
+          labelNode.textContent = label
+          labelNode.style.cssText = 'font:bold 10px Arial,sans-serif;min-height:22px;'
+          const empty = document.createElement('div')
+          empty.textContent = 'Image not available'
+          empty.style.cssText = 'height:140px;border:1px solid #eee;background:#fafafa;display:grid;place-items:center;color:#999;font:9px Arial,sans-serif;'
+          card.append(labelNode, empty)
+        }
+        const titleNode = card.firstElementChild
+        if (titleNode) {
+          titleNode.textContent = label
+          titleNode.style.setProperty('font-size', '10px', 'important')
+          titleNode.style.setProperty('min-height', '22px', 'important')
+        }
+        card.style.setProperty('height', '190px', 'important')
+        card.style.setProperty('min-height', '190px', 'important')
+        card.style.setProperty('padding', '7px', 'important')
+        card.style.setProperty('box-sizing', 'border-box', 'important')
+        card.style.setProperty('break-inside', 'avoid', 'important')
+        const img = card.querySelector('img')
+        if (img) {
+          img.style.setProperty('height', '140px', 'important')
+          img.style.setProperty('max-height', '140px', 'important')
+          img.style.setProperty('width', '100%', 'important')
+          img.style.setProperty('object-fit', 'contain', 'important')
+        }
+        return card
+      })
+      // Keep the reference structure: photo plates on pages 3–5, disclaimer on page 6.
+      // Ten compact photo cards per page (two columns × five rows) keeps all 28
+      // categories within three dedicated photo pages without pushing later sections.
+      for (let p = 0; p < 3; p++) {
+        const photoPage = makePdfPage(p + 3)
+        const grid = document.createElement('div')
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px;row-gap:10px;align-content:start;'
+        preparedCards.slice(p * 10, p * 10 + 10).forEach(card => grid.appendChild(card))
+        photoPage.appendChild(grid)
+      }
+      const page6 = makePdfPage(6, 'Disclaimer / Notes')
+      if (disclaimerSection) {
+        disclaimerSection.style.setProperty('margin-top', '8px', 'important')
+        disclaimerSection.style.setProperty('font-size', '9px', 'important')
+        disclaimerSection.querySelectorAll('*').forEach(el => el.style?.setProperty('font-size', '9px', 'important'))
+        appendSection(page6, disclaimerSection, true)
+      }
+      const page7 = makePdfPage(7, 'Vahan Details')
+      if (vahanSection) {
+        const vahanGrid = vahanSection.children[1]
+        if (vahanGrid) {
+          vahanGrid.style.setProperty('display', 'grid', 'important')
+          vahanGrid.style.setProperty('grid-template-columns', '1fr 1fr 1fr 1fr', 'important')
+          vahanGrid.querySelectorAll(':scope > div').forEach(cell => {
+            cell.style.setProperty('min-height', '48px', 'important')
+            cell.style.setProperty('padding', '5px', 'important')
+          })
+        }
+        appendSection(page7, vahanSection, true)
+      }
+      // Keep the sample's two challan pages. The current portal has no
+      // connected challan feed, so unavailable values are labelled rather than fabricated.
+      const challanBody = challanSection?.children?.[1]
+      if (challanBody) {
+        const headerRow = challanBody.firstElementChild
+        const templateRow = challanBody.children[1]
+        challanBody.innerHTML = ''
+        if (headerRow) {
+          headerRow.style.cssText = 'display:grid;grid-template-columns:35px 1.2fr 1.8fr 80px 85px;background:#f3f3f3;font:bold 9px Arial,sans-serif;border-bottom:1px solid #d0d0d0;'
+          headerRow.innerHTML = '<div style="padding:6px 4px">#</div><div style="padding:6px 4px">Challan Number</div><div style="padding:6px 4px">Offence</div><div style="padding:6px 4px">Amount</div><div style="padding:6px 4px">Status</div>'
+          challanBody.appendChild(headerRow)
+        }
+        const createChallanRow = n => {
+          const row = document.createElement('div')
+          row.style.cssText = 'display:grid;grid-template-columns:35px 1.2fr 1.8fr 80px 85px;font:9px Arial,sans-serif;border-bottom:1px solid #ededed;min-height:22px;'
+          ;[String(n),'—','—','—','—'].forEach(value => {
+            const cell = document.createElement('div')
+            cell.textContent = value
+            cell.style.cssText = 'padding:5px 4px;overflow-wrap:anywhere;'
+            row.appendChild(cell)
+          })
+          return row
+        }
+        for (let n = 1; n <= 48; n++) {
+          if (n === 1) {
+            const first = createChallanRow(n)
+            if (templateRow) {
+              const values = Array.from(templateRow.children).map(el => el.textContent)
+              Array.from(first.children).forEach((el, i) => { if (values[i]) el.textContent = values[i] })
+            }
+            challanBody.appendChild(first)
+          } else challanBody.appendChild(createChallanRow(n))
+        }
+        const note = document.createElement('div')
+        note.textContent = 'Challan data is not connected. Values are intentionally shown as unavailable.'
+        note.style.cssText = 'padding:6px;color:#777;font:8px Arial,sans-serif;'
+        challanBody.appendChild(note)
+      }
+      const page8 = makePdfPage(8, 'Challan Details')
+      if (challanSection) {
+        const firstHalf = challanSection.cloneNode(true)
+        const body = firstHalf.children[1]
+        if (body) Array.from(body.children).slice(29).forEach(node => node.remove())
+        appendSection(page8, firstHalf, true)
+      }
+      const page9 = makePdfPage(9, 'Challan Details')
+      if (challanSection) {
+        const secondHalf = challanSection.cloneNode(true)
+        const body = secondHalf.children[1]
+        if (body) {
+          const children = Array.from(body.children)
+          const header = children.shift()
+          body.innerHTML = ''
+          if (header) body.appendChild(header)
+          children.slice(28, 48).forEach(node => body.appendChild(node))
+        }
+        appendSection(page9, secondHalf, true)
+        const total = document.createElement('div')
+        total.textContent = 'Total: — (pending challan data integration)'
+        total.style.cssText = 'text-align:right;font:bold 10px Arial,sans-serif;padding:8px;'
+        page9.appendChild(total)
+      }
+      clone.innerHTML = ''
+      pdfPages.forEach(page => clone.appendChild(page))
+      clone.style.width = '794px'
+      clone.style.maxWidth = '794px'
+      clone.style.minWidth = '794px'
+      clone.style.height = 'auto'
+      clone.style.overflow = 'visible'
+      clone.style.padding = '0'
+      clone.style.border = '0'
+      clone.style.boxShadow = 'none'
+      clone.querySelectorAll('.cd-pdf-page').forEach(page => {
+        page.style.setProperty('break-inside', 'avoid', 'important')
+        page.style.setProperty('page-break-inside', 'avoid', 'important')
+      })
+
       printHost.appendChild(clone)
       document.body.appendChild(printHost)
 
@@ -4605,89 +5033,71 @@ if (exteriorSection?.parentNode) {
         setTimeout(done, 15000)
       })))
 
+      // Render each deliberately constructed A4 page independently.
+      // Capturing the whole report and slicing it into A4 strips added accidental
+      // extra pages and cut across the fixed page layout from the reference PDF.
       const attempts = [
-        { scale: 2.0, quality: 0.96 },
-        { scale: 1.6, quality: 0.92 },
-        { scale: 1.25, quality: 0.88 },
-        { scale: 1.0, quality: 0.84 }
+        { scale: 1.7, quality: 0.94 },
+        { scale: 1.35, quality: 0.90 },
+        { scale: 1.0, quality: 0.86 }
       ]
       let finalBlob = null
       let finalDoc = null
+      const pageElements = Array.from(clone.querySelectorAll('.cd-pdf-page'))
+      if (pageElements.length !== 9) {
+        throw new Error('PDF layout should contain 9 pages, but ' + pageElements.length + ' were prepared.')
+      }
+
       for (const attempt of attempts) {
-        setPdfMessage(`Rendering complete report and photos (${Math.round(attempt.scale * 100)}% quality)...`)
-        const canvas = await window.html2canvas(clone, {
-          scale: attempt.scale,
-          useCORS: true,
-          allowTaint: false,
-          backgroundColor: '#ffffff',
-          imageTimeout: 30000,
-          logging: false,
-          width: 794,
-          windowWidth: 794,
-          scrollX: 0,
-          scrollY: 0
-        })
-        if (!canvas.width || !canvas.height) throw new Error('Report rendering returned an empty page.')
+        setPdfMessage('Rendering 9-page report (' + Math.round(attempt.scale * 100) + '% quality)...')
         const pdf = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true })
-        const margin = 7
-        const pageWidth = 210
-        const pageHeight = 297
-        const usableWidth = pageWidth - margin * 2
-        const usableHeight = pageHeight - margin * 2
-        const pxPerMm = canvas.width / usableWidth
-        const sliceHeight = Math.max(1, Math.floor(usableHeight * pxPerMm))
-        let page = 0
-        for (let y = 0; y < canvas.height; y += sliceHeight) {
-          if (page > 0) pdf.addPage()
-          const h = Math.min(sliceHeight, canvas.height - y)
-          const slice = document.createElement('canvas')
-          slice.width = canvas.width
-          slice.height = h
-          const ctx = slice.getContext('2d')
-          ctx.fillStyle = '#ffffff'
-          ctx.fillRect(0, 0, slice.width, slice.height)
-          ctx.drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h)
-          const imgData = slice.toDataURL('image/jpeg', attempt.quality)
-          const imgHeight = h / pxPerMm
-          pdf.addImage(imgData, 'JPEG', margin, margin, usableWidth, imgHeight, undefined, 'FAST')
-          page += 1
-        }
-        // Add real PDF URI annotations over each icon tile. The page content is rasterized,
-        // so clickable links must be added separately as PDF annotations.
-        const cloneRect = clone.getBoundingClientRect()
-        // Reuse the A4 page dimensions declared above for raster slicing.
-        const cssPxPerMm = 794 / usableWidth
-        const cssPageHeight = usableHeight * cssPxPerMm
-        for (const target of [...pdfLinkTargets, ...pdfPhotoTargets]) {
-          if (!target.url) continue
-          const rect = target.element.getBoundingClientRect()
-          const leftPx = Math.max(0, rect.left - cloneRect.left - 2)
-          const topPx = Math.max(0, rect.top - cloneRect.top - 2)
-          const widthPx = Math.max(rect.width + 4, target.element.getAttribute('aria-label')?.startsWith('View full-size') ? 34 : 94)
-          const heightPx = Math.max(rect.height + 4, target.element.getAttribute('aria-label')?.startsWith('View full-size') ? 16 : 66)
-          const pageIndex = Math.floor(topPx / cssPageHeight)
-          const yInSlice = topPx - pageIndex * cssPageHeight
-          if (pageIndex >= 0 && pageIndex < pdf.getNumberOfPages()) {
-            pdf.setPage(pageIndex + 1)
-            pdf.link(
-              margin + leftPx / cssPxPerMm,
-              margin + yInSlice / cssPxPerMm,
-              Math.min(widthPx / cssPxPerMm, usableWidth - leftPx / cssPxPerMm),
-              Math.min(heightPx / cssPxPerMm, usableHeight - yInSlice / cssPxPerMm),
-              { url: target.url }
-            )
+        for (let pageIndex = 0; pageIndex < pageElements.length; pageIndex++) {
+          const pageElement = pageElements[pageIndex]
+          const canvas = await window.html2canvas(pageElement, {
+            scale: attempt.scale,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: '#ffffff',
+            imageTimeout: 30000,
+            logging: false,
+            width: 794,
+            height: 1123,
+            windowWidth: 794,
+            scrollX: 0,
+            scrollY: 0
+          })
+          if (!canvas.width || !canvas.height) {
+            throw new Error(`Rendering failed on PDF page ${pageIndex + 1}.`)
           }
+          if (pageIndex > 0) pdf.addPage('a4', 'portrait')
+          pdf.addImage(canvas.toDataURL('image/jpeg', attempt.quality), 'JPEG', 0, 0, 210, 297, undefined, 'FAST')
+
+          // The page is rasterized, so restore its hyperlinks as PDF annotations.
+          const pageRect = pageElement.getBoundingClientRect()
+          const targets = [...pdfLinkTargets, ...pdfPhotoTargets].filter(target =>
+            target.element && target.element.closest('.cd-pdf-page') === pageElement && target.url
+          )
+          for (const target of targets) {
+            const rect = target.element.getBoundingClientRect()
+            const x = Math.max(0, rect.left - pageRect.left)
+            const y = Math.max(0, rect.top - pageRect.top)
+            const w = Math.max(1, rect.width)
+            const h = Math.max(1, rect.height)
+            const mmX = x * 210 / 794
+            const mmY = y * 297 / 1123
+            const mmW = Math.min(w * 210 / 794, 210 - mmX)
+            const mmH = Math.min(h * 297 / 1123, 297 - mmY)
+            if (mmW > 0 && mmH > 0) {
+              pdf.link(mmX, mmY, mmW, mmH, { url: target.url })
+            }
+          }
+          canvas.width = 1
         }
-        // Keep all media links within the existing Exterior Video section; never
-        // append a separate Inspection Media Downloads page.
-        if (photoZipUrl) {
-          setForm(prev => ({ ...prev, exteriorVideo: { ...(prev.exteriorVideo || {}), photoZipUrl } }))
-        }
+
         const blob = pdf.output('blob')
         if (!blob || !blob.size) throw new Error('Generated PDF is empty.')
         finalBlob = blob
         finalDoc = pdf
-        if (canvas.toDataURL) canvas.width = 1 // release the large canvas buffer before the next attempt
         if (finalBlob.size <= 12 * 1024 * 1024) break
       }
       if (!finalBlob || !finalDoc) throw new Error('Unable to generate PDF.')
@@ -4840,9 +5250,10 @@ if (exteriorSection?.parentNode) {
 
   const media = [
     'Profile Picture', 'Right View', 'Right Quarter Panel', 'Rear View', 'Left Quarter Panel', 'Left View', 'Left Side Profile Pic', 'Front View',
+    'Front Underbody', 'Rear Underbody',
     'Engine Compartment 1', 'Engine Compartment 2', 'Engine Compartment 3', 'Boot / Dicky', 'Front Windscreen', 'Windscreen - Interior (from rear seat)',
-    'Dashboard', 'Odometer Reading', 'ABC Pedals (from driver seat)', 'Selfie with Vehicle', 'Other Images 1', 'Other Images 2', 'Other Images 3',
-    'VIN Plate Photo', 'Chassis Imprint', 'Pencil Tracing'
+    'Dashboard', 'Odometer Reading', 'ABC Pedals (from driver seat)', 'Selfie with Vehicle', 'Front Right Tyre', 'Rear Left Tyre', 'Front Left Tyre',
+    'Other Images 1', 'Other Images 2', 'Other Images 3', 'VIN Plate Photo', 'Chassis Imprint', 'Pencil Tracing'
   ]
 
   const vahanFields = ['Registration Number','Manufacturing Date','Registered RTO','Registration Date','Owner Name','RC Blacklist Status','Owner Count','Fitness Upto','Owner Permanent Address','Name of Financier','Owner Present Address','Insurer','Vehicle Name','Policy Number','Make','Insurance Valid Upto','Model','PUCC Number','Vehicle Category','PUCC Valid Upto','Vehicle Class','NP Issued By','Wheel Base','NP Number','Chassis Number','NP Valid Upto','Engine Number','Permit Issue Date','Car Color','Permit Number','Fuel Type','Permit Type','Fuel Norms','Permit Valid From','Engine Capacity','Permit Valid Upto','Gross Vehicle Weight','RC Tax Upto','Seating Capacity','Body Type','Sleeper Capacity']
