@@ -4458,11 +4458,12 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       // The reference report does not contain the internal Pricing workflow panel.
       // Remove that panel from the exported PDF only; pricing data and portal UI remain intact.
       Array.from(clone.querySelectorAll('div')).forEach(el => {
-        if (el.children.length !== 1) return
+        if (el.children.length !== 2) return
         const heading = el.firstElementChild
-        if (!heading || heading.children.length > 4) return
-        const text = (heading.textContent || '').trim()
-        if (text === 'Pricing' && /Valuation Price/.test(el.textContent || '')) {
+        const body = el.lastElementChild
+        if (!heading || !body) return
+        const text = (heading.textContent || '').replace(/\s+/g, ' ').trim()
+        if (/^E?\s*Pricing$/i.test(text) && /Valuation Price/.test(body.textContent || '')) {
           el.remove()
         }
       })
