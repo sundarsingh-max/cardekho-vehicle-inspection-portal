@@ -4795,9 +4795,8 @@ if (exteriorSection?.parentNode) {
       appendSection(page2, remarksSection, true)
       appendSection(page2, detailSection, true)
 
-      // The reference allocates four dedicated photo pages with two columns and
-      // four rows. Fill absent source categories with explicit empty slots rather
-      // than letting the photo grid collapse or move later report sections upward.
+      // Fill absent source categories with explicit empty slots rather than
+      // letting the photo grid collapse or move later report sections upward.
       const sourcePhotoGrid = photoSection?.children?.[1]?.firstElementChild
       const sourceCards = sourcePhotoGrid ? Array.from(sourcePhotoGrid.children) : []
       const photoLabels = [
@@ -4853,19 +4852,22 @@ if (exteriorSection?.parentNode) {
         }
         return card
       })
-      for (let p = 0; p < 4; p++) {
+      // Keep the reference structure: photo plates on pages 3–5, disclaimer on page 6.
+      // Ten compact photo cards per page (two columns × five rows) keeps all 28
+      // categories within three dedicated photo pages without pushing later sections.
+      for (let p = 0; p < 3; p++) {
         const photoPage = makePdfPage(p + 3)
         const grid = document.createElement('div')
         grid.style.cssText = 'display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px;row-gap:10px;align-content:start;'
-        preparedCards.slice(p * 8, p * 8 + 8).forEach(card => grid.appendChild(card))
+        preparedCards.slice(p * 10, p * 10 + 10).forEach(card => grid.appendChild(card))
         photoPage.appendChild(grid)
-        if (p === 3 && disclaimerSection) {
-          const disclaimer = disclaimerSection
-          disclaimer.style.setProperty('margin-top', '10px', 'important')
-          disclaimer.style.setProperty('font-size', '8.5px', 'important')
-          disclaimer.querySelectorAll('*').forEach(el => el.style?.setProperty('font-size', '8.5px', 'important'))
-          photoPage.appendChild(disclaimer)
-        }
+      }
+      const page6 = makePdfPage(6, 'Disclaimer / Notes')
+      if (disclaimerSection) {
+        disclaimerSection.style.setProperty('margin-top', '8px', 'important')
+        disclaimerSection.style.setProperty('font-size', '9px', 'important')
+        disclaimerSection.querySelectorAll('*').forEach(el => el.style?.setProperty('font-size', '9px', 'important'))
+        appendSection(page6, disclaimerSection, true)
       }
       const page7 = makePdfPage(7, 'Vahan Details')
       if (vahanSection) {
@@ -4880,9 +4882,8 @@ if (exteriorSection?.parentNode) {
         }
         appendSection(page7, vahanSection, true)
       }
-      // The supplied sample uses two pages for challans. The current portal has no
-      // connected challan feed yet, so render 48 transparent placeholders instead
-      // of fabricating challan values.
+      // Keep the sample's two challan pages. The current portal has no
+      // connected challan feed, so unavailable values are labelled rather than fabricated.
       const challanBody = challanSection?.children?.[1]
       if (challanBody) {
         const headerRow = challanBody.firstElementChild
