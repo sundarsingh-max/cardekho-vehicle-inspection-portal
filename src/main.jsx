@@ -4455,6 +4455,18 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       })
       clone.querySelectorAll('[data-no-pdf="true"]').forEach(el => el.remove())
 
+      // The reference report does not contain the internal Pricing workflow panel.
+      // Remove that panel from the exported PDF only; pricing data and portal UI remain intact.
+      Array.from(clone.querySelectorAll('div')).forEach(el => {
+        if (el.children.length !== 1) return
+        const heading = el.firstElementChild
+        if (!heading || heading.children.length > 4) return
+        const text = (heading.textContent || '').trim()
+        if (text === 'Pricing' && /Valuation Price/.test(el.textContent || '')) {
+          el.remove()
+        }
+      })
+
       // Keep photos in the reference report's dedicated photo pages; moving Front View
       // into page one changes the sample's page structure and can force later photos to split.
       // PDF-only photo cleanup: remove upload controls, "Replace" actions and
@@ -4526,13 +4538,24 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         img.style.setProperty('flex', '0 0 118px', 'important')
         img.style.setProperty('object-fit', 'contain', 'important')
         img.style.setProperty('object-position', 'center center', 'important')
-        const parent = card.parentElement
-        if (parent) {
-          const siblings = Array.from(parent.children).filter(el => el.querySelector && el.querySelector('img'))
-          if (siblings.length >= 2) {
-            parent.style.setProperty('grid-template-columns', 'repeat(2, minmax(0, 1fr))', 'important')
-            parent.style.setProperty('gap', '10px', 'important')
+        // Walk upward to the actual photo-grid wrapper. The first parent is often
+        // just a one-card row, so styling it leaves the original 3/4-column grid intact.
+        let grid = card.parentElement
+        let photoGrid = null
+        while (grid && grid !== clone) {
+          const imageChildren = Array.from(grid.children).filter(el => el.querySelector && el.querySelector('img'))
+          if (imageChildren.length >= 2) {
+            photoGrid = grid
+            break
           }
+          grid = grid.parentElement
+        }
+        if (photoGrid) {
+          photoGrid.style.setProperty('display', 'grid', 'important')
+          photoGrid.style.setProperty('grid-template-columns', 'repeat(2, minmax(0, 1fr))', 'important')
+          photoGrid.style.setProperty('column-gap', '10px', 'important')
+          photoGrid.style.setProperty('row-gap', '10px', 'important')
+          photoGrid.style.setProperty('align-items', 'start', 'important')
         }
         const view = document.createElement('a')
         view.href = src
