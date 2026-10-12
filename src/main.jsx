@@ -298,8 +298,8 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
       {busy ? <p>Loading records…</p> : error ? <p className="module-error">{error}</p> : <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h.replace(/_/g,' ').toUpperCase()}</th>)}{(active === 'Users' || masterTableByModule[active] && role === 'Admin') && <th>ACTIONS</th>}</tr></thead><tbody>{pageRows.map((row,i)=><tr key={row.id || row.user_id || row.case_id || i}>{headers.map(h=><td key={h}>{row[h] == null || row[h] === '' ? '—' : typeof row[h] === 'boolean' ? (row[h] ? 'Active' : 'Inactive') : String(row[h])}</td>)}{masterTableByModule[active] && role === 'Admin' && <td style={{minWidth:150}}><div style={{display:'flex',gap:6}}><button type="button" title="Edit record" aria-label="Edit record" onClick={()=>beginMasterEdit(row)} style={{borderRadius:8,padding:'7px 10px'}}><Pencil size={15}/> Edit</button><button type="button" title="Remove record" aria-label="Remove record" disabled={masterSaving} onClick={()=>deleteMasterRecord(row)} style={{borderRadius:8,padding:'7px 10px',background:'#fff1f2',color:'#be123c'}}><X size={15}/> Remove</button></div></td>}{active === 'Users' && role === 'Admin' && <td className="user-row-actions" style={{minWidth:300,width:300,whiteSpace:'normal',overflow:'visible'}}>
         <div style={{display:'flex',flexWrap:'nowrap',alignItems:'center',gap:8,minWidth:285}}>
           <label title="Change user role" style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:11,color:'#334155',flexShrink:0}}><icon-placeholder /> <select aria-label="Change user role" value={row.role || 'Coordinator'} disabled={userActionBusy} onChange={e=>managePortalUser(row.user_id,'set_role',{role:e.target.value})} style={{minWidth:112,maxWidth:125,padding:'7px 8px',borderRadius:7,border:'1px solid #cbd5e1',background:'#fff'}}>{['Admin','Coordinator','TPA','QC','Pricing'].map(r=><option key={r}>{r}</option>)}</select></label>
-          <button title={row.is_active ? 'Deactivate account' : 'Activate account'} aria-label={row.is_active ? 'Deactivate account' : 'Activate account'} type="button" disabled={userActionBusy || !row.user_id} onClick={()=>managePortalUser(row.user_id,row.is_active ? 'deactivate' : 'activate')} style={{display:'inline-flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:3,minWidth:62,minHeight:54,flexShrink:0,borderRadius:9,padding:'6px 7px',background:row.is_active?'#fff1f2':'#ecfdf5',color:row.is_active?'#be123c':'#047857',border:'1px solid '+(row.is_active?'#fecdd3':'#a7f3d0'),fontWeight:700,fontSize:10,whiteSpace:'nowrap',lineHeight:1.2}}><span aria-hidden="true" style={{fontSize:18,lineHeight:1}}>{row.is_active ? '⏻' : '✓'}</span><span>{row.is_active ? 'Deactivate' : 'Activate'}</span></button>
-          <button title="Require password change at next login" aria-label="Force password change" type="button" disabled={userActionBusy || !row.user_id} onClick={()=>managePortalUser(row.user_id,'force_password_change')} style={{display:'inline-flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:3,minWidth:82,minHeight:54,flexShrink:0,borderRadius:9,padding:'6px 8px',background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',fontWeight:700,fontSize:10,whiteSpace:'nowrap',lineHeight:1.2}}><span aria-hidden="true" style={{fontSize:18,lineHeight:1}}>🔑</span><span>Reset Password</span></button>
+          <button title={row.is_active ? 'Deactivate account' : 'Activate account'} aria-label={row.is_active ? 'Deactivate account' : 'Activate account'} type="button" disabled={userActionBusy || !row.user_id} onClick={()=>managePortalUser(row.user_id,row.is_active ? 'deactivate' : 'activate')} style={{display:'inline-flex',alignItems:'center',justifyContent:'center',width:38,height:38,flexShrink:0,borderRadius:9,padding:6,background:row.is_active?'#fff1f2':'#ecfdf5',color:row.is_active?'#be123c':'#047857',border:'1px solid '+(row.is_active?'#fecdd3':'#a7f3d0'),fontWeight:700,fontSize:18,lineHeight:1}}>{row.is_active ? '⏻' : '✓'}</button>
+          <button title="Require password change at next login" aria-label="Force password change" type="button" disabled={userActionBusy || !row.user_id} onClick={()=>managePortalUser(row.user_id,'force_password_change')} style={{display:'inline-flex',alignItems:'center',justifyContent:'center',width:38,height:38,flexShrink:0,borderRadius:9,padding:6,background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',fontSize:18,lineHeight:1}}>🔑</button>
         </div>
       </td>}</tr>)}{!pageRows.length && <tr><td colSpan={headers.length}>{busy ? 'Loading…' : 'No records found in this table, or access is not granted by Supabase policies.'}</td></tr>}</tbody></table></div>}
       <div className="case-pagination"><span>Showing {filtered.length ? (page-1)*pageSize+1 : 0}–{Math.min(page*pageSize,filtered.length)} of {filtered.length}</span><div className="page-controls"><button disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Previous</button><span>Page {page} of {pages}</span><button disabled={page>=pages} onClick={()=>setPage(p=>Math.min(pages,p+1))}>Next</button></div></div>
@@ -491,7 +491,7 @@ function App({ role = 'Admin', userProfile = null }) {
       return
     }
 
-    if (!/^\\d{10}$/.test(mobile)) {
+    if (!/^\d{10}$/.test(mobile)) {
       setTpaError('Enter a valid 10 digit mobile number.')
       return
     }
@@ -2974,7 +2974,7 @@ function App({ role = 'Admin', userProfile = null }) {
                               <td>{formatDate(item.created_at)}</td>
                               <td>
                                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                  <button type="button" className="icon-button" title="Move to TPA QC" aria-label="Move to TPA QC" onClick={() => moveCaseToTpaQc(item)} disabled={actionSaving} style={{display:'inline-flex',alignItems:'center',justifyContent:'center',gap:5,minWidth:34,height:32}}><ShieldCheck size={15} aria-hidden="true" /><span style={{fontSize:11}}>TPA QC</span></button>
+                                  <button type="button" className="icon-button" title="Move to TPA QC" aria-label="Move to TPA QC" onClick={() => moveCaseToTpaQc(item)} disabled={actionSaving} style={{display:'inline-flex',alignItems:'center',justifyContent:'center',width:36,height:34,padding:0}}><ShieldCheck size={19} strokeWidth={2.3} aria-hidden="true" /></button>
                                   <button type="button" className="icon-button" title="Reassign" aria-label="Reassign" onClick={() => openReassignCase(item)}>
                                     <RefreshCw size={15} />
                                   </button>
@@ -3665,6 +3665,26 @@ function App({ role = 'Admin', userProfile = null }) {
 
             </form>
 
+          </Modal>
+        )}
+
+        {tpaModal && (
+          <Modal title="Add TPA" close={() => { if (!tpaSaving) { setTpaModal(false); setTpaError('') } }}>
+            <form onSubmit={event => { event.preventDefault(); saveTpa() }} className="user-admin-form" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:14,alignItems:'end'}}>
+              <label className="field"><span>TPA Name *</span><input required value={tpaForm.name} onChange={e=>setTpaForm(p=>({...p,name:e.target.value}))} placeholder="Enter TPA name" /></label>
+              <label className="field"><span>Mobile Number *</span><input required inputMode="numeric" type="tel" maxLength={10} pattern="[0-9]{10}" value={tpaForm.mobile} onChange={e=>setTpaForm(p=>({...p,mobile:e.target.value.replace(/\D/g,'').slice(0,10)}))} placeholder="10 digit mobile number" /></label>
+              <label className="field"><span>Email</span><input type="email" value={tpaForm.email} onChange={e=>setTpaForm(p=>({...p,email:e.target.value}))} placeholder="name@company.com" /></label>
+              <label className="field"><span>Location</span><input value={tpaForm.location} onChange={e=>setTpaForm(p=>({...p,location:e.target.value}))} placeholder="Location" /></label>
+              <label className="field"><span>Zone</span><input value={tpaForm.zone} onChange={e=>setTpaForm(p=>({...p,zone:e.target.value}))} placeholder="Zone" /></label>
+              <label className="field"><span>State</span><input value={tpaForm.state} onChange={e=>setTpaForm(p=>({...p,state:e.target.value}))} placeholder="State" /></label>
+              <label className="field"><span>Client Mapping</span><input value={tpaForm.client_mapping} onChange={e=>setTpaForm(p=>({...p,client_mapping:e.target.value}))} placeholder="Client name(s), or leave blank for all" /></label>
+              <label style={{display:'flex',alignItems:'center',gap:8}}><input type="checkbox" checked={Boolean(tpaForm.is_active)} onChange={e=>setTpaForm(p=>({...p,is_active:e.target.checked}))} /> Active TPA</label>
+              {tpaError && <p role="alert" className="module-error" style={{gridColumn:'1 / -1',margin:0}}>{tpaError}</p>}
+              <div style={{display:'flex',justifyContent:'flex-end',gap:10,gridColumn:'1 / -1'}}>
+                <button type="button" className="secondary" disabled={tpaSaving} onClick={()=>{setTpaModal(false);setTpaError('')}}>Cancel</button>
+                <button type="submit" className="primary" disabled={tpaSaving}>{tpaSaving ? 'Saving…' : 'Save TPA'}</button>
+              </div>
+            </form>
           </Modal>
         )}
 
