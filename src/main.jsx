@@ -63,6 +63,51 @@ const items = [
 
 
 function OperationalModule({ active, cases = [], locations = [], tpas = [], clients = [], onRefresh, role = 'Admin' }) {
+  const [permissionMatrix, setPermissionMatrix] = useState({})
+  const [permissionBusy, setPermissionBusy] = useState(false)
+  const [permissionMessage, setPermissionMessage] = useState('')
+  const [permissionError, setPermissionError] = useState('')
+  const permissionRoles = ['Admin', 'Coordinator', 'TPA', 'QC', 'Pricing']
+  const permissionModules = ['Dashboard','Add Lead','Open Lead','Assign','Reassign','TPA QC','QC','QC Hold','Pricing','Report Generated','MIS','Case Search','Users','TPA Master','Client Master','MMV Master','Location/Zone Master','Permissions','Audit Trail','Help Desk']
+  useEffect(() => {
+    if (active !== 'Permissions' || role !== 'Admin') return
+    let cancelled = false
+    async function loadPermissions() {
+      setPermissionBusy(true); setPermissionError(''); setPermissionMessage('')
+      try {
+        const { data, error } = await supabase.from('role_permissions').select('role,module,can_access')
+        if (error) throw error
+        const matrix = {}
+        for (const r of permissionRoles) {
+          matrix[r] = {}
+          for (const m of permissionModules) matrix[r][m] = r === 'Admin' ? true : false
+        }
+        for (const row of data || []) if (matrix[row.role] && permissionModules.includes(row.module)) matrix[row.role][row.module] = Boolean(row.can_access)
+        if (!cancelled) setPermissionMatrix(matrix)
+      } catch (err) {
+        if (!cancelled) setPermissionError('Permission settings could not be loaded. Apply the role_permissions SQL migration in Supabase, then refresh. ' + (err?.message || ''))
+      } finally { if (!cancelled) setPermissionBusy(false) }
+    }
+    loadPermissions()
+    return () => { cancelled = true }
+  }, [active, role])
+  function changePermission(roleName, moduleName, allowed) {
+    if (roleName === 'Admin' && moduleName === 'Permissions') return
+    setPermissionMatrix(prev => ({ ...prev, [roleName]: { ...(prev[roleName] || {}), [moduleName]: allowed } }))
+    setPermissionMessage('')
+  }
+  async function savePermissions() {
+    if (role !== 'Admin') return
+    setPermissionBusy(true); setPermissionError(''); setPermissionMessage('')
+    try {
+      const rows = permissionRoles.flatMap(r => permissionModules.map(m => ({ role: r, module: m, can_access: r === 'Admin' ? true : Boolean(permissionMatrix[r]?.[m]), updated_at: new Date().toISOString() })))
+      const { error } = await supabase.from('role_permissions').upsert(rows, { onConflict: 'role,module' })
+      if (error) throw error
+      setPermissionMessage('Permissions saved successfully.')
+    } catch (err) {
+      setPermissionError('Could not save permissions. Apply the role_permissions SQL migration and verify Admin RLS policy. ' + (err?.message || ''))
+    } finally { setPermissionBusy(false) }
+  }
   const [userForm, setUserForm] = useState({ full_name: '', email: '', role: 'Coordinator', temporary_password: '' })
   const [masterForm, setMasterForm] = useState({ name: '', client_code: '', segment: 'CAR', make: '', model: '', variant: '', year: '', zone: '', state: '', city: '', is_active: true })
   const [masterEditingId, setMasterEditingId] = useState(null)
@@ -244,11 +289,9 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
       <p className="module-note">ⓘ Requires the secure admin-create-user and admin-manage-user Supabase Edge Functions to be deployed. The browser never receives the service-role key.</p>
     </div>}
     {active === 'Permissions' && role === 'Admin' && <div className="user-admin-panel" style={{padding:18,border:'1px solid #dbe5f2',borderRadius:14,background:'#f8fbff',marginBottom:18}}>
-      <h3 style={{marginTop:0,color:'#17345d'}}>Configure role permissions</h3>
-      <p className="module-note">The current database view only lists user roles. It does not contain a role-permission matrix or a save endpoint, so permission switches cannot safely be saved yet. This requires a role_permissions table with Admin-only read/write policies and server-side enforcement before access can be granted here.</p>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:10}}>
-        {['Admin','Coordinator','TPA','QC','Pricing'].map(r=><div key={r} style={{padding:12,border:'1px solid #dbe5f2',borderRadius:10,background:'#fff'}}><strong style={{display:'block',marginBottom:4}}>{r}</strong><span style={{fontSize:12,color:'#64748b'}}>{r==='Admin'?'Full administration (protected)': 'Role assignment exists; individual permissions are not configured in the database yet.'}</span></div>)}
-      </div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap'}}><div><h3 style={{marginTop:0,color:'#17345d',marginBottom:5}}>Role & Permission Settings</h3><p className="module-note" style={{marginTop:0}}>Select the modules each role can access. Admin access is always retained.</p></div><button type="button" disabled={permissionBusy} onClick={savePermissions} style={{minWidth:150}}>{permissionBusy ? 'Saving…' : '🔐 Save Permissions'}</button></div>
+      {permissionError && <p className="module-error">{permissionError}</p>}{permissionMessage && <p className="module-success">✓ {permissionMessage}</p>}
+      {permissionBusy && !Object.keys(permissionMatrix).length ? <p>Loading role permissions…</p> : <div style={{overflowX:'auto',marginTop:12}}><table className="data-table"><thead><tr><th>MODULE / SCREEN</th>{permissionRoles.map(r=><th key={r} style={{textAlign:'center'}}>{r}</th>)}</tr></thead><tbody>{permissionModules.map(m=><tr key={m}><td style={{fontWeight:600,minWidth:180}}>{m}</td>{permissionRoles.map(r=><td key={r} style={{textAlign:'center'}}><label title={r==='Admin'?'Admin access is mandatory':(permissionMatrix[r]?.[m]?'Allowed':'Denied')} style={{display:'inline-flex',alignItems:'center',justifyContent:'center',gap:5,cursor:r==='Admin'?'not-allowed':'pointer'}}><input type="checkbox" aria-label={r+' access to '+m} checked={r==='Admin'?true:Boolean(permissionMatrix[r]?.[m])} disabled={r==='Admin'||permissionBusy} onChange={e=>changePermission(r,m,e.target.checked)} style={{width:17,height:17,accentColor:'#1769e0'}}/><span style={{fontSize:11,color:permissionMatrix[r]?.[m]?'#166534':'#64748b'}}>{r==='Admin'?'Always on':permissionMatrix[r]?.[m]?'Allow':'Deny'}</span></label></td>)}</tr>)}</tbody></table></div>}
     </div>}
     {(['Case Search','Audit Trail','Client Master','MMV Master','Location/Zone Master','Users','Permissions'].includes(active)) && <>
       <input className="module-search" value={query} onChange={e=>{setQuery(e.target.value);setPage(1)}} placeholder={active === 'Case Search' ? 'Search case ID, registration, customer, mobile…' : 'Filter records…'} />
