@@ -4747,11 +4747,25 @@ if (exteriorSection?.parentNode) {
         page.appendChild(copy)
       }
       const page1 = makePdfPage(1)
+      const vehicleTitleRow = document.createElement('div')
+      vehicleTitleRow.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin:4px 0 8px;'
       if (vehicleNameNode) {
         const name = vehicleNameNode.cloneNode(true)
-        name.style.cssText = 'font:bold 17px Arial,sans-serif;margin:4px 0 8px;'
-        page1.appendChild(name)
+        name.style.cssText = 'font:bold 17px Arial,sans-serif;margin:0;flex:1;'
+        vehicleTitleRow.appendChild(name)
       }
+      if (form.valuation_price) {
+        const priceBlock = document.createElement('div')
+        priceBlock.style.cssText = 'text-align:right;min-width:120px;font: bold 16px Arial,sans-serif;color:#111;'
+        const priceLabel = document.createElement('div')
+        priceLabel.textContent = String(form.valuation_price).trim()
+        const priceCaption = document.createElement('div')
+        priceCaption.textContent = 'Estimated Valuation'
+        priceCaption.style.cssText = 'font:9px Arial,sans-serif;color:#666;margin-top:3px;'
+        priceBlock.append(priceLabel, priceCaption)
+        vehicleTitleRow.appendChild(priceBlock)
+      }
+      page1.appendChild(vehicleTitleRow)
       appendSection(page1, vehicleSection, true)
       appendSection(page1, scoreSection, true)
       const page2 = makePdfPage(2)
@@ -4854,10 +4868,14 @@ if (exteriorSection?.parentNode) {
         const headerRow = challanBody.firstElementChild
         const templateRow = challanBody.children[1]
         challanBody.innerHTML = ''
-        if (headerRow) challanBody.appendChild(headerRow)
+        if (headerRow) {
+          headerRow.style.cssText = 'display:grid;grid-template-columns:35px 1.2fr 1.8fr 80px 85px;background:#f3f3f3;font:bold 9px Arial,sans-serif;border-bottom:1px solid #d0d0d0;'
+          headerRow.innerHTML = '<div style="padding:6px 4px">#</div><div style="padding:6px 4px">Challan Number</div><div style="padding:6px 4px">Offence</div><div style="padding:6px 4px">Amount</div><div style="padding:6px 4px">Status</div>'
+          challanBody.appendChild(headerRow)
+        }
         const createChallanRow = n => {
           const row = document.createElement('div')
-          row.style.cssText = 'display:grid;grid-template-columns:35px 1.2fr 1fr 1fr 70px;font:9px Arial,sans-serif;border-bottom:1px solid #ededed;min-height:22px;'
+          row.style.cssText = 'display:grid;grid-template-columns:35px 1.2fr 1.8fr 80px 85px;font:9px Arial,sans-serif;border-bottom:1px solid #ededed;min-height:22px;'
           ;[String(n),'—','—','—','—'].forEach(value => {
             const cell = document.createElement('div')
             cell.textContent = value
