@@ -4399,8 +4399,11 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         }
       }
 
-      // Render a fixed-width clone so wide two-column tables and photos are not clipped by the screen viewport.
-      // The sample PDF remains the target layout; this preserves the portal report's sections while fixing field values and image clarity.
+      // Build a fixed-width, PDF-only copy. Keep the live portal unchanged.
+      // Reference structure: summary/details first, then dedicated two-column photo pages,
+      // followed by disclaimer, Vahan details, and challan details. The photo grid and cards
+      // below are deliberately constrained to prevent the portal's four-column screen layout
+      // from leaking into the exported report.
       const source = reportRef.current
       printHost = document.createElement('div')
       printHost.style.cssText = 'position:fixed;left:-20000px;top:0;width:794px;background:#fff;z-index:-1;overflow:visible;'
@@ -4505,18 +4508,22 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
 
         // Never embed a data:image Base64 string as a PDF URL annotation.
         if (!src || !/^https?:\/\//i.test(src)) return
-        card.style.setProperty('min-height', '190px', 'important')
-        card.style.setProperty('height', 'auto', 'important')
+        card.style.setProperty('min-height', '174px', 'important')
+        card.style.setProperty('height', '174px', 'important')
+        card.style.setProperty('display', 'flex', 'important')
+        card.style.setProperty('flex-direction', 'column', 'important')
+        card.style.setProperty('justify-content', 'flex-start', 'important')
         card.style.setProperty('overflow', 'visible', 'important')
         card.style.setProperty('padding', '8px', 'important')
         card.style.setProperty('box-sizing', 'border-box', 'important')
         card.style.setProperty('break-inside', 'avoid', 'important')
         card.style.setProperty('page-break-inside', 'avoid', 'important')
         img.style.setProperty('display', 'block', 'important')
-        img.style.setProperty('max-height', 'none', 'important')
-        img.style.setProperty('height', 'auto', 'important')
+        img.style.setProperty('max-height', '118px', 'important')
+        img.style.setProperty('height', '118px', 'important')
         img.style.setProperty('min-height', '0', 'important')
         img.style.setProperty('width', '100%', 'important')
+        img.style.setProperty('flex', '0 0 118px', 'important')
         img.style.setProperty('object-fit', 'contain', 'important')
         img.style.setProperty('object-position', 'center center', 'important')
         const parent = card.parentElement
