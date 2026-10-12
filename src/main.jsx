@@ -5009,7 +5009,7 @@ if (exteriorSection?.parentNode) {
             scrollY: 0
           })
           if (!canvas.width || !canvas.height) {
-            throw new Error(\`Rendering failed on PDF page \${pageIndex + 1}.\`)
+            throw new Error(`Rendering failed on PDF page ${pageIndex + 1}.`)
           }
           if (pageIndex > 0) pdf.addPage('a4', 'portrait')
           pdf.addImage(canvas.toDataURL('image/jpeg', attempt.quality), 'JPEG', 0, 0, 210, 297, undefined, 'FAST')
