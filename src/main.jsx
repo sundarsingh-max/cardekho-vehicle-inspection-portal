@@ -4669,8 +4669,10 @@ if (exteriorSection?.parentNode) {
             cuts.push(canvas.height)
             break
           }
+          // A cut must never exceed one printable A4 slice; otherwise the image
+          // would be clipped or compressed when added to the PDF page.
           const lower = cursor + Math.floor(sliceHeight * 0.72)
-          const upper = Math.min(canvas.height, cursor + Math.floor(sliceHeight * 1.08))
+          const upper = Math.min(canvas.height, cursor + sliceHeight)
           const candidates = boundaries.filter(y => y >= lower && y <= upper)
           const next = candidates.length
             ? candidates.reduce((best, y) => Math.abs(y-target) < Math.abs(best-target) ? y : best, candidates[0])
@@ -4713,14 +4715,16 @@ if (exteriorSection?.parentNode) {
           const topPx = Math.max(0, rect.top - cloneRect.top - 2)
           const widthPx = Math.max(rect.width + 4, target.element.getAttribute('aria-label')?.startsWith('View full-size') ? 34 : 94)
           const heightPx = Math.max(rect.height + 4, target.element.getAttribute('aria-label')?.startsWith('View full-size') ? 16 : 66)
-          let pageIndex = cuts.findIndex((cut, index) => index < cuts.length - 1 && topPx >= cut && topPx < cuts[index + 1])
-          if (pageIndex < 0) pageIndex = Math.min(cuts.length - 2, Math.floor(topPx / cssPageHeight))
-          const yInSlice = Math.max(0, topPx - cuts[pageIndex])
-          if (pageIndex >= 0 && pageIndex < pdf.getNumberOfPages() && yInSlice < cssPageHeight) {
+          // Pagination cuts are measured in canvas pixels, while DOM bounds are CSS pixels.
+          const topCanvasPx = topPx * canvasScale
+          let pageIndex = cuts.findIndex((cut, index) => index < cuts.length - 1 && topCanvasPx >= cut && topCanvasPx < cuts[index + 1])
+          if (pageIndex < 0) pageIndex = Math.min(cuts.length - 2, Math.floor(topCanvasPx / sliceHeight))
+          const yInSliceCssPx = Math.max(0, (topCanvasPx - cuts[pageIndex]) / canvasScale)
+          if (pageIndex >= 0 && pageIndex < pdf.getNumberOfPages() && yInSliceCssPx < cssPageHeight) {
             pdf.setPage(pageIndex + 1)
             pdf.link(
               margin + leftPx / cssPxPerMm,
-              margin + yInSlice / cssPxPerMm,
+              margin + yInSliceCssPx / cssPxPerMm,
               Math.min(widthPx / cssPxPerMm, usableWidth - leftPx / cssPxPerMm),
               Math.min(heightPx / cssPxPerMm, usableHeight - yInSlice / cssPxPerMm),
               { url: target.url }
