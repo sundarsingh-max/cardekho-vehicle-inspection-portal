@@ -4721,11 +4721,28 @@ if (exteriorSection?.parentNode) {
         const copy = node
         copy.style.setProperty('margin-top', '5px', 'important')
         copy.style.setProperty('flex-shrink', '0', 'important')
+        const headingText = (copy.firstElementChild?.textContent || '').replace(/\s+/g, ' ').trim()
         if (compact) {
           copy.style.setProperty('font-size', '9px', 'important')
           copy.querySelectorAll('*').forEach(el => {
             if (el.style) el.style.setProperty('font-size', '9px', 'important')
           })
+        }
+        // Match the sample's compact four-column Vehicle Details layout.
+        if (headingText.includes('Vehicle Details') && copy.children[1]) {
+          copy.children[1].style.setProperty('padding', '5px', 'important')
+          copy.children[1].style.setProperty('display', 'grid', 'important')
+          copy.children[1].style.setProperty('grid-template-columns', 'repeat(4,minmax(0,1fr))', 'important')
+          copy.children[1].style.setProperty('column-gap', '10px', 'important')
+          copy.children[1].style.setProperty('row-gap', '1px', 'important')
+          copy.children[1].querySelectorAll(':scope > div').forEach(cell => {
+            cell.style.setProperty('min-width', '0', 'important')
+            cell.style.setProperty('overflow-wrap', 'anywhere', 'important')
+          })
+        }
+        if (headingText.includes('Summary / Score') && copy.children[1]) {
+          copy.children[1].style.setProperty('grid-template-columns', 'repeat(2,minmax(0,1fr))', 'important')
+          copy.children[1].style.setProperty('column-gap', '14px', 'important')
         }
         page.appendChild(copy)
       }
