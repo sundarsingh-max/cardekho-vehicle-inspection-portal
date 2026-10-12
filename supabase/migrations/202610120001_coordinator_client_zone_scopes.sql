@@ -16,6 +16,13 @@ alter table public.coordinator_case_scopes enable row level security;
 grant select, insert, delete on public.coordinator_case_scopes to authenticated;
 grant usage, select on sequence public.coordinator_case_scopes_id_seq to authenticated;
 
+drop policy if exists "coordinators read own scopes" on public.coordinator_case_scopes;
+create policy "coordinators read own scopes"
+on public.coordinator_case_scopes
+for select
+to authenticated
+using (user_id = (select auth.uid()));
+
 drop policy if exists "active admins manage coordinator scopes" on public.coordinator_case_scopes;
 create policy "active admins manage coordinator scopes"
 on public.coordinator_case_scopes
