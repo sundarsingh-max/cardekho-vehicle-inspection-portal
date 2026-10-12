@@ -4987,11 +4987,11 @@ if (exteriorSection?.parentNode) {
       let finalDoc = null
       const pageElements = Array.from(clone.querySelectorAll('.cd-pdf-page'))
       if (pageElements.length !== 9) {
-        throw new Error(\`PDF layout should contain 9 pages, but \${pageElements.length} were prepared.\`)
+        throw new Error('PDF layout should contain 9 pages, but ' + pageElements.length + ' were prepared.')
       }
 
       for (const attempt of attempts) {
-        setPdfMessage(\`Rendering 9-page report (\${Math.round(attempt.scale * 100)}% quality)...\`)
+        setPdfMessage('Rendering 9-page report (' + Math.round(attempt.scale * 100) + '% quality)...')
         const pdf = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true })
         for (let pageIndex = 0; pageIndex < pageElements.length; pageIndex++) {
           const pageElement = pageElements[pageIndex]
