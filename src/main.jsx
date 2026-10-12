@@ -4704,7 +4704,6 @@ if (exteriorSection?.parentNode) {
         // Add real PDF URI annotations over each icon tile. The page content is rasterized,
         // so clickable links must be added separately as PDF annotations.
         const cloneRect = clone.getBoundingClientRect()
-        // Reuse the A4 page dimensions declared above for raster slicing.
         const cssPxPerMm = 794 / usableWidth
         const cssPageHeight = usableHeight * cssPxPerMm
         for (const target of [...pdfLinkTargets, ...pdfPhotoTargets]) {
@@ -4714,9 +4713,10 @@ if (exteriorSection?.parentNode) {
           const topPx = Math.max(0, rect.top - cloneRect.top - 2)
           const widthPx = Math.max(rect.width + 4, target.element.getAttribute('aria-label')?.startsWith('View full-size') ? 34 : 94)
           const heightPx = Math.max(rect.height + 4, target.element.getAttribute('aria-label')?.startsWith('View full-size') ? 16 : 66)
-          const pageIndex = Math.floor(topPx / cssPageHeight)
-          const yInSlice = topPx - pageIndex * cssPageHeight
-          if (pageIndex >= 0 && pageIndex < pdf.getNumberOfPages()) {
+          let pageIndex = cuts.findIndex((cut, index) => index < cuts.length - 1 && topPx >= cut && topPx < cuts[index + 1])
+          if (pageIndex < 0) pageIndex = Math.min(cuts.length - 2, Math.floor(topPx / cssPageHeight))
+          const yInSlice = Math.max(0, topPx - cuts[pageIndex])
+          if (pageIndex >= 0 && pageIndex < pdf.getNumberOfPages() && yInSlice < cssPageHeight) {
             pdf.setPage(pageIndex + 1)
             pdf.link(
               margin + leftPx / cssPxPerMm,
