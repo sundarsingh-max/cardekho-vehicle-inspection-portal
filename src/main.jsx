@@ -4523,8 +4523,8 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         if (parent) {
           const siblings = Array.from(parent.children).filter(el => el.querySelector && el.querySelector('img'))
           if (siblings.length >= 2) {
-            parent.style.setProperty('grid-template-columns', 'repeat(3, minmax(0, 1fr))', 'important')
-            parent.style.setProperty('gap', '8px', 'important')
+            parent.style.setProperty('grid-template-columns', 'repeat(2, minmax(0, 1fr))', 'important')
+            parent.style.setProperty('gap', '10px', 'important')
           }
         }
         const view = document.createElement('a')
