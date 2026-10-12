@@ -4975,135 +4975,71 @@ if (exteriorSection?.parentNode) {
         setTimeout(done, 15000)
       })))
 
+      // Render each deliberately constructed A4 page independently.
+      // Capturing the whole report and slicing it into A4 strips added accidental
+      // extra pages and cut across the fixed page layout from the reference PDF.
       const attempts = [
-        { scale: 2.0, quality: 0.96 },
-        { scale: 1.6, quality: 0.92 },
-        { scale: 1.25, quality: 0.88 },
-        { scale: 1.0, quality: 0.84 }
+        { scale: 1.7, quality: 0.94 },
+        { scale: 1.35, quality: 0.90 },
+        { scale: 1.0, quality: 0.86 }
       ]
       let finalBlob = null
       let finalDoc = null
-      for (const attempt of attempts) {
-        setPdfMessage(`Rendering complete report and photos (${Math.round(attempt.scale * 100)}% quality)...`)
-        const canvas = await window.html2canvas(clone, {
-          scale: attempt.scale,
-          useCORS: true,
-          allowTaint: false,
-          backgroundColor: '#ffffff',
-          imageTimeout: 30000,
-          logging: false,
-          width: 794,
-          windowWidth: 794,
-          scrollX: 0,
-          scrollY: 0
-        })
-        if (!canvas.width || !canvas.height) throw new Error('Report rendering returned an empty page.')
-        const pdf = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true })
-        const margin = 7
-        const pageWidth = 210
-        const pageHeight = 297
-        const usableWidth = pageWidth - margin * 2
-        const usableHeight = pageHeight - margin * 2
-        const pxPerMm = canvas.width / usableWidth
-        const sliceHeight = Math.max(1, Math.floor(usableHeight * pxPerMm))
+      const pageElements = Array.from(clone.querySelectorAll('.cd-pdf-page'))
+      if (pageElements.length !== 9) {
+        throw new Error(\`PDF layout should contain 9 pages, but \${pageElements.length} were prepared.\`)
+      }
 
-        // Prefer page cuts at section/card boundaries instead of slicing through a
-        // table row, heading, or photo. The fallback remains the normal A4 slice height.
-        const boundaryCandidates = new Set([0, canvas.height])
-        const canvasScale = canvas.width / 794
-        const cloneRectForCuts = clone.getBoundingClientRect()
-        const addBoundary = element => {
-          if (!element) return
-          const rect = element.getBoundingClientRect()
-          const y = Math.round((rect.top - cloneRectForCuts.top) * canvasScale)
-          if (y > 0 && y < canvas.height) boundaryCandidates.add(y)
-        }
-        Array.from(clone.children).forEach(addBoundary)
-        Array.from(clone.querySelectorAll('div')).forEach(el => {
-          const style = getComputedStyle(el)
-          if (style.breakInside === 'avoid' || style.pageBreakInside === 'avoid') addBoundary(el)
-        })
-        const boundaries = Array.from(boundaryCandidates).sort((a,b) => a-b)
-        const cuts = [0]
-        let cursor = 0
-        while (cursor < canvas.height) {
-          const target = Math.min(cursor + sliceHeight, canvas.height)
-          if (target === canvas.height) {
-            cuts.push(canvas.height)
-            break
+      for (const attempt of attempts) {
+        setPdfMessage(\`Rendering 9-page report (\${Math.round(attempt.scale * 100)}% quality)...\`)
+        const pdf = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true })
+        for (let pageIndex = 0; pageIndex < pageElements.length; pageIndex++) {
+          const pageElement = pageElements[pageIndex]
+          const canvas = await window.html2canvas(pageElement, {
+            scale: attempt.scale,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: '#ffffff',
+            imageTimeout: 30000,
+            logging: false,
+            width: 794,
+            height: 1123,
+            windowWidth: 794,
+            scrollX: 0,
+            scrollY: 0
+          })
+          if (!canvas.width || !canvas.height) {
+            throw new Error(\`Rendering failed on PDF page \${pageIndex + 1}.\`)
           }
-          // A cut must never exceed one printable A4 slice; otherwise the image
-          // would be clipped or compressed when added to the PDF page.
-          const lower = cursor + Math.floor(sliceHeight * 0.72)
-          const upper = Math.min(canvas.height, cursor + sliceHeight)
-          const candidates = boundaries.filter(y => y >= lower && y <= upper)
-          const next = candidates.length
-            ? candidates.reduce((best, y) => Math.abs(y-target) < Math.abs(best-target) ? y : best, candidates[0])
-            : target
-          if (next <= cursor) {
-            cuts.push(target)
-            cursor = target
-          } else {
-            cuts.push(next)
-            cursor = next
+          if (pageIndex > 0) pdf.addPage('a4', 'portrait')
+          pdf.addImage(canvas.toDataURL('image/jpeg', attempt.quality), 'JPEG', 0, 0, 210, 297, undefined, 'FAST')
+
+          // The page is rasterized, so restore its hyperlinks as PDF annotations.
+          const pageRect = pageElement.getBoundingClientRect()
+          const targets = [...pdfLinkTargets, ...pdfPhotoTargets].filter(target =>
+            target.element && target.element.closest('.cd-pdf-page') === pageElement && target.url
+          )
+          for (const target of targets) {
+            const rect = target.element.getBoundingClientRect()
+            const x = Math.max(0, rect.left - pageRect.left)
+            const y = Math.max(0, rect.top - pageRect.top)
+            const w = Math.max(1, rect.width)
+            const h = Math.max(1, rect.height)
+            const mmX = x * 210 / 794
+            const mmY = y * 297 / 1123
+            const mmW = Math.min(w * 210 / 794, 210 - mmX)
+            const mmH = Math.min(h * 297 / 1123, 297 - mmY)
+            if (mmW > 0 && mmH > 0) {
+              pdf.link(mmX, mmY, mmW, mmH, { url: target.url })
+            }
           }
+          canvas.width = 1
         }
-        let page = 0
-        for (let i = 0; i < cuts.length - 1; i++) {
-          const y = cuts[i]
-          const h = cuts[i + 1] - y
-          if (h <= 0) continue
-          if (page > 0) pdf.addPage()
-          const slice = document.createElement('canvas')
-          slice.width = canvas.width
-          slice.height = h
-          const ctx = slice.getContext('2d')
-          ctx.fillStyle = '#ffffff'
-          ctx.fillRect(0, 0, slice.width, slice.height)
-          ctx.drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h)
-          const imgData = slice.toDataURL('image/jpeg', attempt.quality)
-          const imgHeight = h / pxPerMm
-          pdf.addImage(imgData, 'JPEG', margin, margin, usableWidth, Math.min(imgHeight, usableHeight), undefined, 'FAST')
-          page += 1
-        }
-        // Add real PDF URI annotations over each icon tile. The page content is rasterized,
-        // so clickable links must be added separately as PDF annotations.
-        const cloneRect = clone.getBoundingClientRect()
-        const cssPxPerMm = 794 / usableWidth
-        const cssPageHeight = usableHeight * cssPxPerMm
-        for (const target of [...pdfLinkTargets, ...pdfPhotoTargets]) {
-          if (!target.url) continue
-          const rect = target.element.getBoundingClientRect()
-          const leftPx = Math.max(0, rect.left - cloneRect.left - 2)
-          const topPx = Math.max(0, rect.top - cloneRect.top - 2)
-          const widthPx = Math.max(rect.width + 4, target.element.getAttribute('aria-label')?.startsWith('View full-size') ? 34 : 94)
-          const heightPx = Math.max(rect.height + 4, target.element.getAttribute('aria-label')?.startsWith('View full-size') ? 16 : 66)
-          // Pagination cuts are measured in canvas pixels, while DOM bounds are CSS pixels.
-          const topCanvasPx = topPx * canvasScale
-          let pageIndex = cuts.findIndex((cut, index) => index < cuts.length - 1 && topCanvasPx >= cut && topCanvasPx < cuts[index + 1])
-          if (pageIndex < 0) pageIndex = Math.min(cuts.length - 2, Math.floor(topCanvasPx / sliceHeight))
-          const yInSliceCssPx = Math.max(0, (topCanvasPx - cuts[pageIndex]) / canvasScale)
-          if (pageIndex >= 0 && pageIndex < pdf.getNumberOfPages() && yInSliceCssPx < cssPageHeight) {
-            pdf.setPage(pageIndex + 1)
-            pdf.link(
-              margin + leftPx / cssPxPerMm,
-              margin + yInSliceCssPx / cssPxPerMm,
-              Math.min(widthPx / cssPxPerMm, usableWidth - leftPx / cssPxPerMm),
-              Math.min(heightPx / cssPxPerMm, usableHeight - yInSliceCssPx / cssPxPerMm),
-              { url: target.url }
-            )
-          }
-        }
-        // Keep all media links within the existing Exterior Video section; never
-        // append a separate Inspection Media Downloads page.
-        if (photoZipUrl) {
-          setForm(prev => ({ ...prev, exteriorVideo: { ...(prev.exteriorVideo || {}), photoZipUrl } }))
-        }
+
         const blob = pdf.output('blob')
         if (!blob || !blob.size) throw new Error('Generated PDF is empty.')
         finalBlob = blob
         finalDoc = pdf
-        if (canvas.toDataURL) canvas.width = 1 // release the large canvas buffer before the next attempt
         if (finalBlob.size <= 12 * 1024 * 1024) break
       }
       if (!finalBlob || !finalDoc) throw new Error('Unable to generate PDF.')
