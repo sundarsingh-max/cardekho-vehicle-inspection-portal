@@ -5034,7 +5034,7 @@ if (exteriorSection?.parentNode) {
               margin + leftPx / cssPxPerMm,
               margin + yInSliceCssPx / cssPxPerMm,
               Math.min(widthPx / cssPxPerMm, usableWidth - leftPx / cssPxPerMm),
-              Math.min(heightPx / cssPxPerMm, usableHeight - yInSlice / cssPxPerMm),
+              Math.min(heightPx / cssPxPerMm, usableHeight - yInSliceCssPx / cssPxPerMm),
               { url: target.url }
             )
           }
