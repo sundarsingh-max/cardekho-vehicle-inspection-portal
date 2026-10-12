@@ -108,6 +108,51 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
       setPermissionError('Could not save permissions. Apply the role_permissions SQL migration and verify Admin RLS policy. ' + (err?.message || ''))
     } finally { setPermissionBusy(false) }
   }
+  const [scopeUserId, setScopeUserId] = useState('')
+  const [scopeClientId, setScopeClientId] = useState('')
+  const [scopeZone, setScopeZone] = useState('')
+  const [scopeRows, setScopeRows] = useState([])
+  const [scopeLoading, setScopeLoading] = useState(false)
+  const [scopeError, setScopeError] = useState('')
+  const [scopeMessage, setScopeMessage] = useState('')
+  useEffect(() => {
+    if (active !== 'Permissions' || role !== 'Admin') return
+    let cancelled = false
+    ;(async () => {
+      setScopeLoading(true); setScopeError('')
+      try {
+        const { data, error } = await supabase.from('coordinator_case_scopes').select('id,user_id,client_id,zone,created_at').order('created_at', { ascending: false }).limit(5000)
+        if (error) throw error
+        if (!cancelled) setScopeRows(data || [])
+      } catch (e) {
+        if (!cancelled) setScopeError('Coordinator scope table is not ready. Apply the new SQL migration in Supabase. ' + (e?.message || ''))
+      } finally { if (!cancelled) setScopeLoading(false) }
+    })()
+    return () => { cancelled = true }
+  }, [active, role])
+  async function addCoordinatorScope(e) {
+    e.preventDefault()
+    if (role !== 'Admin' || !scopeUserId || !scopeClientId || !scopeZone) return
+    setScopeLoading(true); setScopeError(''); setScopeMessage('')
+    try {
+      const { error } = await supabase.from('coordinator_case_scopes').insert({ user_id: scopeUserId, client_id: String(scopeClientId), zone: scopeZone.trim() })
+      if (error) throw error
+      const { data, error: reloadError } = await supabase.from('coordinator_case_scopes').select('id,user_id,client_id,zone,created_at').order('created_at', { ascending: false }).limit(5000)
+      if (reloadError) throw reloadError
+      setScopeRows(data || []); setScopeMessage('Coordinator access granted for this Client + Zone.')
+    } catch (e) { setScopeError(e?.message || 'Unable to grant coordinator scope.') }
+    finally { setScopeLoading(false) }
+  }
+  async function removeCoordinatorScope(id) {
+    if (role !== 'Admin' || !window.confirm('Revoke this Coordinator Client + Zone access?')) return
+    setScopeLoading(true); setScopeError(''); setScopeMessage('')
+    try {
+      const { error } = await supabase.from('coordinator_case_scopes').delete().eq('id', id)
+      if (error) throw error
+      setScopeRows(rows => rows.filter(row => row.id !== id)); setScopeMessage('Coordinator access revoked.')
+    } catch (e) { setScopeError(e?.message || 'Unable to revoke access.') }
+    finally { setScopeLoading(false) }
+  }
   const [userForm, setUserForm] = useState({ full_name: '', email: '', role: 'Coordinator', temporary_password: '' })
   const [masterForm, setMasterForm] = useState({ name: '', client_code: '', segment: 'CAR', make: '', model: '', variant: '', year: '', zone: '', state: '', city: '', is_active: true })
   const [masterEditingId, setMasterEditingId] = useState(null)
@@ -287,6 +332,18 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
       {userActionMessage && <p className="module-success">✓ {userActionMessage}</p>}
       {userActionError && <p className="module-error">⚠ {userActionError}</p>}
       <p className="module-note">ⓘ Requires the secure admin-create-user and admin-manage-user Supabase Edge Functions to be deployed. The browser never receives the service-role key.</p>
+    </div>}
+    {active === 'Permissions' && role === 'Admin' && <div className="user-admin-panel" style={{padding:18,border:'1px solid #dbe5f2',borderRadius:14,background:'#fff',marginBottom:18}}>
+      <h3 style={{marginTop:0,color:'#17345d'}}>Coordinator Client & Zone Access</h3>
+      <p className="module-note">Grant each Coordinator access to specific Client + Zone combinations. Cases outside these combinations are filtered by the Supabase security policy after the SQL migration is applied.</p>
+      <form onSubmit={addCoordinatorScope} style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12,alignItems:'end'}}>
+        <label><span style={{display:'block',marginBottom:6}}>Coordinator</span><select required value={scopeUserId} onChange={e=>setScopeUserId(e.target.value)}><option value="">Select Coordinator</option>{rows.filter(u=>u.role==='Coordinator' && u.is_active!==false && u.user_id).map(u=><option key={u.user_id} value={u.user_id}>{u.full_name || u.email} — {u.email}</option>)}</select></label>
+        <label><span style={{display:'block',marginBottom:6}}>Client</span><select required value={scopeClientId} onChange={e=>setScopeClientId(e.target.value)}><option value="">Select Client</option>{clients.filter(c=>c.is_active!==false).map(c=><option key={c.id} value={c.id}>{clientDisplayName(c)}</option>)}</select></label>
+        <label><span style={{display:'block',marginBottom:6}}>Zone</span><select required value={scopeZone} onChange={e=>setScopeZone(e.target.value)}><option value="">Select Zone</option>{uniqueValues(locations.filter(l=>l.is_active!==false).map(l=>l.zone)).map(z=><option key={z} value={z}>{z}</option>)}</select></label>
+        <button type="submit" disabled={scopeLoading || !scopeUserId || !scopeClientId || !scopeZone}>Grant Access</button>
+      </form>
+      {scopeError && <p className="module-error">{scopeError}</p>}{scopeMessage && <p className="module-success">{scopeMessage}</p>}
+      <div className="table-wrap" style={{marginTop:12}}><table className="data-table"><thead><tr><th>COORDINATOR</th><th>CLIENT</th><th>ZONE</th><th>ACTION</th></tr></thead><tbody>{scopeRows.map(s=>{const u=rows.find(x=>x.user_id===s.user_id); const c=clients.find(x=>String(x.id)===String(s.client_id)); return <tr key={s.id}><td>{u?.full_name || u?.email || s.user_id}</td><td>{c ? clientDisplayName(c) : s.client_id}</td><td>{s.zone}</td><td><button type="button" className="secondary" disabled={scopeLoading} onClick={()=>removeCoordinatorScope(s.id)}>Revoke</button></td></tr>})}{!scopeRows.length && <tr><td colSpan={4}>{scopeLoading?'Loading access rules…':'No Coordinator access rules configured.'}</td></tr>}</tbody></table></div>
     </div>}
     {active === 'Permissions' && role === 'Admin' && <div className="user-admin-panel" style={{padding:18,border:'1px solid #dbe5f2',borderRadius:14,background:'#f8fbff',marginBottom:18}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap'}}><div><h3 style={{marginTop:0,color:'#17345d',marginBottom:5}}>Role & Permission Settings</h3><p className="module-note" style={{marginTop:0}}>Select the modules each role can access. Admin access is always retained.</p></div><button type="button" disabled={permissionBusy} onClick={savePermissions} style={{minWidth:150}}>{permissionBusy ? 'Saving…' : '🔐 Save Permissions'}</button></div>
