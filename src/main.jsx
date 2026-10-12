@@ -4669,6 +4669,240 @@ if (exteriorSection?.parentNode) {
   clone.appendChild(linksWrap)
 }
 
+
+      // Build the export as the same nine fixed A4 pages as the supplied sample.
+      // This is PDF-only DOM: the actual portal/report editor is not modified.
+      const directChildren = Array.from(clone.children)
+      const sectionNode = title => directChildren.find(node => {
+        const heading = node.firstElementChild
+        return heading && (heading.textContent || '').replace(/\\s+/g, ' ').trim().includes(title)
+      })
+      const vehicleSection = sectionNode('Vehicle Details')
+      const scoreSection = sectionNode('Summary / Score')
+      const remarksSection = sectionNode('Remarks')
+      const detailSection = sectionNode('Detailed Inspection')
+      const photoSection = sectionNode('Inspection Photos / Media')
+      const vahanSection = sectionNode('Vahan Details')
+      const challanSection = sectionNode('Challan Details')
+      const disclaimerSection = sectionNode('Disclaimer / Notes')
+      const reportTitle = directChildren.find(node => node !== vehicleSection && node.textContent && /Vehicle Inspection Report/.test(node.textContent) && node.querySelector && !node.firstElementChild?.textContent?.includes('Vehicle Details'))
+      const vehicleNameNode = directChildren.find(node => node !== reportTitle && node.textContent && /Vehicle Inspection Report/.test(node.textContent) === false && node.children.length === 0 && node.textContent.trim())
+      const certificate = String(caseItem.case_id || '').replace(/^CASE-/, '')
+      const inspectionDate = new Date().toLocaleDateString('en-GB')
+      const pageHeader = () => {
+        const header = document.createElement('div')
+        header.style.cssText = 'height:42px;box-sizing:border-box;text-align:right;font: bold 13px Arial,sans-serif;color:#222;padding:0 0 5px;border-bottom:1px solid #aaa;margin-bottom:8px;'
+        header.innerHTML = '<div>Vehicle Inspection Report</div><div style="font-size:9px;font-weight:400;margin-top:3px">Certificate No.: ' + certificate.replace(/[&<>"]/g, '') + '</div>'
+        return header
+      }
+      const pdfPages = []
+      const makePdfPage = (number, title = '') => {
+        const page = document.createElement('div')
+        page.className = 'cd-pdf-page'
+        page.dataset.pdfPage = String(number)
+        page.style.cssText = 'width:794px;height:1123px;min-height:1123px;max-height:1123px;box-sizing:border-box;overflow:hidden;background:#fff;padding:24px 30px 22px;font-family:Arial,Helvetica,sans-serif;color:#171717;position:relative;display:flex;flex-direction:column;'
+        page.appendChild(pageHeader())
+        if (title) {
+          const heading = document.createElement('div')
+          heading.textContent = title
+          heading.style.cssText = 'font:bold 15px Arial,sans-serif;text-align:center;margin:2px 0 12px;'
+          page.appendChild(heading)
+        }
+        const footer = document.createElement('div')
+        footer.className = 'cd-pdf-footer'
+        footer.style.cssText = 'position:absolute;left:30px;right:30px;bottom:12px;height:18px;border-top:1px solid #ddd;padding-top:4px;display:flex;justify-content:space-between;font:9px Arial,sans-serif;color:#555;background:#fff;'
+        footer.innerHTML = '<span>Date of Inspection ' + inspectionDate + '</span><span>Page: ' + number + ' of 9</span>'
+        page.appendChild(footer)
+        pdfPages.push(page)
+        return page
+      }
+      const appendSection = (page, node, compact = false) => {
+        if (!node) return
+        const copy = node
+        copy.style.setProperty('margin-top', '5px', 'important')
+        copy.style.setProperty('flex-shrink', '0', 'important')
+        if (compact) {
+          copy.style.setProperty('font-size', '9px', 'important')
+          copy.querySelectorAll('*').forEach(el => {
+            if (el.style) el.style.setProperty('font-size', '9px', 'important')
+          })
+        }
+        page.appendChild(copy)
+      }
+      const page1 = makePdfPage(1)
+      if (vehicleNameNode) {
+        const name = vehicleNameNode.cloneNode(true)
+        name.style.cssText = 'font:bold 17px Arial,sans-serif;margin:4px 0 8px;'
+        page1.appendChild(name)
+      }
+      appendSection(page1, vehicleSection, true)
+      appendSection(page1, scoreSection, true)
+      const page2 = makePdfPage(2)
+      // Put the media download shortcuts before the checklist, as in the reference.
+      const downloadArea = directChildren.find(node => node.tagName === 'DIV' && node.querySelector && node.querySelector('a[aria-label="Download Exterior video"],a[aria-label="Download images"]'))
+      if (downloadArea) page2.appendChild(downloadArea)
+      appendSection(page2, remarksSection, true)
+      appendSection(page2, detailSection, true)
+
+      // The reference allocates four dedicated photo pages with two columns and
+      // four rows. Fill absent source categories with explicit empty slots rather
+      // than letting the photo grid collapse or move later report sections upward.
+      const sourcePhotoGrid = photoSection?.children?.[1]?.firstElementChild
+      const sourceCards = sourcePhotoGrid ? Array.from(sourcePhotoGrid.children) : []
+      const photoLabels = [
+        'Profile Picture','Right View','Right Quarter Panel','Rear View','Left Quarter Panel','Left View','Left Side Profile Pic','Front View',
+        'Front Underbody','Rear Underbody','Engine Compartment','Engine Compartment','Boot / Dicky','Front Windscreen','Windscreen - Interior (from rear seat)','Odometer Reading',
+        'ABC Pedals (from driver seat)','ABC Pedals (from driver seat)','Front Right Tyre','Rear Left Tyre','Rear Left Tyre','Front Left Tyre','Selfie with Vehicle','Other Images',
+        'Other Images','VinPlate Photo','Chassis Imprint','Chassis Number Pencil Tracing'
+      ]
+      const normalizedLabel = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+      const usedCards = new Set()
+      const preparedCards = photoLabels.map((label, index) => {
+        const wanted = normalizedLabel(label)
+        let card = sourceCards.find(candidate => {
+          if (usedCards.has(candidate)) return false
+          const title = candidate.firstElementChild?.textContent || ''
+          const actual = normalizedLabel(title)
+          return actual === wanted ||
+            (wanted === 'vinplatephoto' && actual.includes('vinplate')) ||
+            (wanted === 'chassisnumberpenciltracing' && actual.includes('penciltracing')) ||
+            (wanted === 'enginecompartment' && actual.includes('enginecompartment')) ||
+            (wanted === 'otherimages' && actual.includes('otherimages')) ||
+            (wanted === 'abcpedalsfromdriverseat' && actual.includes('abcpedals'))
+        })
+        if (card) usedCards.add(card)
+        else {
+          card = document.createElement('div')
+          card.style.cssText = 'border:1px solid #d0d0d0;box-sizing:border-box;padding:8px;height:190px;display:flex;flex-direction:column;background:#fff;'
+          const labelNode = document.createElement('div')
+          labelNode.textContent = label
+          labelNode.style.cssText = 'font:bold 10px Arial,sans-serif;min-height:22px;'
+          const empty = document.createElement('div')
+          empty.textContent = 'Image not available'
+          empty.style.cssText = 'height:140px;border:1px solid #eee;background:#fafafa;display:grid;place-items:center;color:#999;font:9px Arial,sans-serif;'
+          card.append(labelNode, empty)
+        }
+        const titleNode = card.firstElementChild
+        if (titleNode) {
+          titleNode.textContent = label
+          titleNode.style.setProperty('font-size', '10px', 'important')
+          titleNode.style.setProperty('min-height', '22px', 'important')
+        }
+        card.style.setProperty('height', '190px', 'important')
+        card.style.setProperty('min-height', '190px', 'important')
+        card.style.setProperty('padding', '7px', 'important')
+        card.style.setProperty('box-sizing', 'border-box', 'important')
+        card.style.setProperty('break-inside', 'avoid', 'important')
+        const img = card.querySelector('img')
+        if (img) {
+          img.style.setProperty('height', '140px', 'important')
+          img.style.setProperty('max-height', '140px', 'important')
+          img.style.setProperty('width', '100%', 'important')
+          img.style.setProperty('object-fit', 'contain', 'important')
+        }
+        return card
+      })
+      for (let p = 0; p < 4; p++) {
+        const photoPage = makePdfPage(p + 3)
+        const grid = document.createElement('div')
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px;row-gap:10px;align-content:start;'
+        preparedCards.slice(p * 8, p * 8 + 8).forEach(card => grid.appendChild(card))
+        photoPage.appendChild(grid)
+        if (p === 3 && disclaimerSection) {
+          const disclaimer = disclaimerSection
+          disclaimer.style.setProperty('margin-top', '10px', 'important')
+          disclaimer.style.setProperty('font-size', '8.5px', 'important')
+          disclaimer.querySelectorAll('*').forEach(el => el.style?.setProperty('font-size', '8.5px', 'important'))
+          photoPage.appendChild(disclaimer)
+        }
+      }
+      const page7 = makePdfPage(7, 'Vahan Details')
+      if (vahanSection) {
+        const vahanGrid = vahanSection.children[1]
+        if (vahanGrid) {
+          vahanGrid.style.setProperty('display', 'grid', 'important')
+          vahanGrid.style.setProperty('grid-template-columns', '1fr 1fr 1fr 1fr', 'important')
+          vahanGrid.querySelectorAll(':scope > div').forEach(cell => {
+            cell.style.setProperty('min-height', '48px', 'important')
+            cell.style.setProperty('padding', '5px', 'important')
+          })
+        }
+        appendSection(page7, vahanSection, true)
+      }
+      // The supplied sample uses two pages for challans. The current portal has no
+      // connected challan feed yet, so render 48 transparent placeholders instead
+      // of fabricating challan values.
+      const challanBody = challanSection?.children?.[1]
+      if (challanBody) {
+        const headerRow = challanBody.firstElementChild
+        const templateRow = challanBody.children[1]
+        challanBody.innerHTML = ''
+        if (headerRow) challanBody.appendChild(headerRow)
+        const createChallanRow = n => {
+          const row = document.createElement('div')
+          row.style.cssText = 'display:grid;grid-template-columns:35px 1.2fr 1fr 1fr 70px;font:9px Arial,sans-serif;border-bottom:1px solid #ededed;min-height:22px;'
+          ;[String(n),'—','—','—','—'].forEach(value => {
+            const cell = document.createElement('div')
+            cell.textContent = value
+            cell.style.cssText = 'padding:5px 4px;overflow-wrap:anywhere;'
+            row.appendChild(cell)
+          })
+          return row
+        }
+        for (let n = 1; n <= 48; n++) {
+          if (n === 1) {
+            const first = createChallanRow(n)
+            if (templateRow) {
+              const values = Array.from(templateRow.children).map(el => el.textContent)
+              Array.from(first.children).forEach((el, i) => { if (values[i]) el.textContent = values[i] })
+            }
+            challanBody.appendChild(first)
+          } else challanBody.appendChild(createChallanRow(n))
+        }
+        const note = document.createElement('div')
+        note.textContent = 'Challan data is not connected. Values are intentionally shown as unavailable.'
+        note.style.cssText = 'padding:6px;color:#777;font:8px Arial,sans-serif;'
+        challanBody.appendChild(note)
+      }
+      const page8 = makePdfPage(8, 'Challan Details')
+      if (challanSection) {
+        const firstHalf = challanSection.cloneNode(true)
+        const body = firstHalf.children[1]
+        if (body) Array.from(body.children).slice(29).forEach(node => node.remove())
+        appendSection(page8, firstHalf, true)
+      }
+      const page9 = makePdfPage(9, 'Challan Details')
+      if (challanSection) {
+        const secondHalf = challanSection.cloneNode(true)
+        const body = secondHalf.children[1]
+        if (body) {
+          const children = Array.from(body.children)
+          const header = children.shift()
+          body.innerHTML = ''
+          if (header) body.appendChild(header)
+          children.slice(28, 48).forEach(node => body.appendChild(node))
+        }
+        appendSection(page9, secondHalf, true)
+        const total = document.createElement('div')
+        total.textContent = 'Total: — (pending challan data integration)'
+        total.style.cssText = 'text-align:right;font:bold 10px Arial,sans-serif;padding:8px;'
+        page9.appendChild(total)
+      }
+      clone.innerHTML = ''
+      pdfPages.forEach(page => clone.appendChild(page))
+      clone.style.width = '794px'
+      clone.style.maxWidth = '794px'
+      clone.style.minWidth = '794px'
+      clone.style.height = 'auto'
+      clone.style.overflow = 'visible'
+      clone.style.padding = '0'
+      clone.style.border = '0'
+      clone.style.boxShadow = 'none'
+      clone.querySelectorAll('.cd-pdf-page').forEach(page => {
+        page.style.setProperty('break-inside', 'avoid', 'important')
+        page.style.setProperty('page-break-inside', 'avoid', 'important')
+      })
+
       printHost.appendChild(clone)
       document.body.appendChild(printHost)
 
