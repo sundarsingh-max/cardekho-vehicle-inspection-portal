@@ -4523,7 +4523,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
       // PDF-only photo cleanup: remove upload controls, "Replace" actions and
       // original filenames (e.g. IMG-20261006-WA0708.jpg) from the exported copy.
       // Keep the live portal untouched and preserve the photo title + image.
-      const photoTitlePattern = /^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VinPlate Photo|Chassis Imprint|Chassis Number Pencil Tracing)$/i
+      const photoTitlePattern = /^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Front Underbody|Rear Underbody|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VIN Plate Photo|VinPlate Photo|Chassis Imprint|Pencil Tracing|Chassis Number Pencil Tracing)$/i
       Array.from(clone.querySelectorAll('div')).forEach(card => {
         const img = card.querySelector(':scope > img') || card.querySelector('img')
         if (!img) return
@@ -4548,7 +4548,7 @@ function TpaQcReport({ mode = 'TPA QC', caseItem, cases = [], clients = [], loca
         const title = (children[0]?.textContent || '').trim()
         const img = card.querySelector('img')
         if (!title || !img) return
-        if (!/^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VinPlate Photo|Chassis Imprint|Chassis Number Pencil Tracing)$/i.test(title)) return
+        if (!/^(Profile Picture|Right View|Right Quarter Panel|Rear View|Left Quarter Panel|Left View|Left Side Profile Pic|Front View|Front Underbody|Rear Underbody|Engine Compartment.*|Boot \/ Dicky|Front Windscreen|Windscreen.*|Dashboard|Odometer Reading|ABC Pedals.*|Front Right Tyre|Rear Left Tyre|Front Left Tyre|Selfie with Vehicle|Other Images.*|VIN Plate Photo|VinPlate Photo|Chassis Imprint|Pencil Tracing|Chassis Number Pencil Tracing)$/i.test(title)) return
         
 // Remove original View anchors that may point to a data:image Base64 URL.
         card.querySelectorAll('a').forEach(anchor => {
@@ -5218,9 +5218,10 @@ if (exteriorSection?.parentNode) {
 
   const media = [
     'Profile Picture', 'Right View', 'Right Quarter Panel', 'Rear View', 'Left Quarter Panel', 'Left View', 'Left Side Profile Pic', 'Front View',
+    'Front Underbody', 'Rear Underbody',
     'Engine Compartment 1', 'Engine Compartment 2', 'Engine Compartment 3', 'Boot / Dicky', 'Front Windscreen', 'Windscreen - Interior (from rear seat)',
-    'Dashboard', 'Odometer Reading', 'ABC Pedals (from driver seat)', 'Selfie with Vehicle', 'Other Images 1', 'Other Images 2', 'Other Images 3',
-    'VIN Plate Photo', 'Chassis Imprint', 'Pencil Tracing'
+    'Dashboard', 'Odometer Reading', 'ABC Pedals (from driver seat)', 'Selfie with Vehicle', 'Front Right Tyre', 'Rear Left Tyre', 'Front Left Tyre',
+    'Other Images 1', 'Other Images 2', 'Other Images 3', 'VIN Plate Photo', 'Chassis Imprint', 'Pencil Tracing'
   ]
 
   const vahanFields = ['Registration Number','Manufacturing Date','Registered RTO','Registration Date','Owner Name','RC Blacklist Status','Owner Count','Fitness Upto','Owner Permanent Address','Name of Financier','Owner Present Address','Insurer','Vehicle Name','Policy Number','Make','Insurance Valid Upto','Model','PUCC Number','Vehicle Category','PUCC Valid Upto','Vehicle Class','NP Issued By','Wheel Base','NP Number','Chassis Number','NP Valid Upto','Engine Number','Permit Issue Date','Car Color','Permit Number','Fuel Type','Permit Type','Fuel Norms','Permit Valid From','Engine Capacity','Permit Valid Upto','Gross Vehicle Weight','RC Tax Upto','Seating Capacity','Body Type','Sleeper Capacity']
