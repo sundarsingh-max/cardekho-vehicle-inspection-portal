@@ -4643,10 +4643,52 @@ if (exteriorSection?.parentNode) {
         const usableHeight = pageHeight - margin * 2
         const pxPerMm = canvas.width / usableWidth
         const sliceHeight = Math.max(1, Math.floor(usableHeight * pxPerMm))
+
+        // Prefer page cuts at section/card boundaries instead of slicing through a
+        // table row, heading, or photo. The fallback remains the normal A4 slice height.
+        const boundaryCandidates = new Set([0, canvas.height])
+        const canvasScale = canvas.width / 794
+        const cloneRectForCuts = clone.getBoundingClientRect()
+        const addBoundary = element => {
+          if (!element) return
+          const rect = element.getBoundingClientRect()
+          const y = Math.round((rect.top - cloneRectForCuts.top) * canvasScale)
+          if (y > 0 && y < canvas.height) boundaryCandidates.add(y)
+        }
+        Array.from(clone.children).forEach(addBoundary)
+        Array.from(clone.querySelectorAll('div')).forEach(el => {
+          const style = getComputedStyle(el)
+          if (style.breakInside === 'avoid' || style.pageBreakInside === 'avoid') addBoundary(el)
+        })
+        const boundaries = Array.from(boundaryCandidates).sort((a,b) => a-b)
+        const cuts = [0]
+        let cursor = 0
+        while (cursor < canvas.height) {
+          const target = Math.min(cursor + sliceHeight, canvas.height)
+          if (target === canvas.height) {
+            cuts.push(canvas.height)
+            break
+          }
+          const lower = cursor + Math.floor(sliceHeight * 0.72)
+          const upper = Math.min(canvas.height, cursor + Math.floor(sliceHeight * 1.08))
+          const candidates = boundaries.filter(y => y >= lower && y <= upper)
+          const next = candidates.length
+            ? candidates.reduce((best, y) => Math.abs(y-target) < Math.abs(best-target) ? y : best, candidates[0])
+            : target
+          if (next <= cursor) {
+            cuts.push(target)
+            cursor = target
+          } else {
+            cuts.push(next)
+            cursor = next
+          }
+        }
         let page = 0
-        for (let y = 0; y < canvas.height; y += sliceHeight) {
+        for (let i = 0; i < cuts.length - 1; i++) {
+          const y = cuts[i]
+          const h = cuts[i + 1] - y
+          if (h <= 0) continue
           if (page > 0) pdf.addPage()
-          const h = Math.min(sliceHeight, canvas.height - y)
           const slice = document.createElement('canvas')
           slice.width = canvas.width
           slice.height = h
@@ -4656,7 +4698,7 @@ if (exteriorSection?.parentNode) {
           ctx.drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h)
           const imgData = slice.toDataURL('image/jpeg', attempt.quality)
           const imgHeight = h / pxPerMm
-          pdf.addImage(imgData, 'JPEG', margin, margin, usableWidth, imgHeight, undefined, 'FAST')
+          pdf.addImage(imgData, 'JPEG', margin, margin, usableWidth, Math.min(imgHeight, usableHeight), undefined, 'FAST')
           page += 1
         }
         // Add real PDF URI annotations over each icon tile. The page content is rasterized,
