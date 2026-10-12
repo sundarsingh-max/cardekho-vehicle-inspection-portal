@@ -3116,7 +3116,7 @@ function App({ role = 'Admin', userProfile = null }) {
                                     onClick={() => moveCaseToTpaQc(item)}
                                     disabled={actionSaving}
                                   >
-                                    <CheckCircle2 size={15} />
+                                    <ShieldCheck size={15} aria-hidden="true" />
                                   </button>
                                   <button
                                     type="button"
