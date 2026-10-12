@@ -243,6 +243,13 @@ function OperationalModule({ active, cases = [], locations = [], tpas = [], clie
       {userActionError && <p className="module-error">⚠ {userActionError}</p>}
       <p className="module-note">ⓘ Requires the secure admin-create-user and admin-manage-user Supabase Edge Functions to be deployed. The browser never receives the service-role key.</p>
     </div>}
+    {active === 'Permissions' && role === 'Admin' && <div className="user-admin-panel" style={{padding:18,border:'1px solid #dbe5f2',borderRadius:14,background:'#f8fbff',marginBottom:18}}>
+      <h3 style={{marginTop:0,color:'#17345d'}}>Configure role permissions</h3>
+      <p className="module-note">The current database view only lists user roles. It does not contain a role-permission matrix or a save endpoint, so permission switches cannot safely be saved yet. This requires a role_permissions table with Admin-only read/write policies and server-side enforcement before access can be granted here.</p>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:10}}>
+        {['Admin','Coordinator','TPA','QC','Pricing'].map(r=><div key={r} style={{padding:12,border:'1px solid #dbe5f2',borderRadius:10,background:'#fff'}}><strong style={{display:'block',marginBottom:4}}>{r}</strong><span style={{fontSize:12,color:'#64748b'}}>{r==='Admin'?'Full administration (protected)': 'Role assignment exists; individual permissions are not configured in the database yet.'}</span></div>)}
+      </div>
+    </div>}
     {(['Case Search','Audit Trail','Client Master','MMV Master','Location/Zone Master','Users','Permissions'].includes(active)) && <>
       <input className="module-search" value={query} onChange={e=>{setQuery(e.target.value);setPage(1)}} placeholder={active === 'Case Search' ? 'Search case ID, registration, customer, mobile…' : 'Filter records…'} />
       {busy ? <p>Loading records…</p> : error ? <p className="module-error">{error}</p> : <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h.replace(/_/g,' ').toUpperCase()}</th>)}{(active === 'Users' || masterTableByModule[active] && role === 'Admin') && <th>ACTIONS</th>}</tr></thead><tbody>{pageRows.map((row,i)=><tr key={row.id || row.user_id || row.case_id || i}>{headers.map(h=><td key={h}>{row[h] == null || row[h] === '' ? '—' : typeof row[h] === 'boolean' ? (row[h] ? 'Active' : 'Inactive') : String(row[h])}</td>)}{masterTableByModule[active] && role === 'Admin' && <td style={{minWidth:150}}><div style={{display:'flex',gap:6}}><button type="button" title="Edit record" aria-label="Edit record" onClick={()=>beginMasterEdit(row)} style={{borderRadius:8,padding:'7px 10px'}}><Pencil size={15}/> Edit</button><button type="button" title="Remove record" aria-label="Remove record" disabled={masterSaving} onClick={()=>deleteMasterRecord(row)} style={{borderRadius:8,padding:'7px 10px',background:'#fff1f2',color:'#be123c'}}><X size={15}/> Remove</button></div></td>}{active === 'Users' && role === 'Admin' && <td className="user-row-actions" style={{minWidth:300,width:300,whiteSpace:'normal',overflow:'visible'}}>
@@ -2924,7 +2931,7 @@ function App({ role = 'Admin', userProfile = null }) {
                               <td>{formatDate(item.created_at)}</td>
                               <td>
                                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                  <button type="button" className="primary" title="Move case to TPA QC" onClick={() => moveCaseToTpaQc(item)} disabled={actionSaving}>Move to TPA QC</button>
+                                  <button type="button" className="icon-button" title="Move to TPA QC" aria-label="Move to TPA QC" onClick={() => moveCaseToTpaQc(item)} disabled={actionSaving} style={{display:'inline-flex',alignItems:'center',justifyContent:'center',gap:5,minWidth:34,height:32}}><ShieldCheck size={15} aria-hidden="true" /><span style={{fontSize:11}}>TPA QC</span></button>
                                   <button type="button" className="icon-button" title="Reassign" aria-label="Reassign" onClick={() => openReassignCase(item)}>
                                     <RefreshCw size={15} />
                                   </button>
